@@ -1,0 +1,12 @@
+{
+  "saved_at": "2026-11-02T00:00:00",
+  "note": "手入力で固定した待機姿勢(実機の値の概数)",
+  "pose": {
+    "shoulder_pan.pos": -4.0,
+    "shoulder_lift.pos": -103.0,
+    "elbow_flex.pos": 96.0,
+    "wrist_flex.pos": 56.0,
+    "wrist_roll.pos": 4.0,
+    "gripper.pos": 12.0
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "shoulder_pan": {
+    "scale": 57.29578,
+    "offset": -4.088
+  },
+  "shoulder_lift": {
+    "scale": 57.29578,
+    "offset": 1.363
+  },
+  "elbow_flex": {
+    "scale": 57.29578,
+    "offset": 6.11
+  },
+  "wrist_flex": {
+    "scale": 57.29578,
+    "offset": -1.451
+  },
+  "wrist_roll": {
+    "scale": 57.29578,
+    "offset": 3.736
+  },
+  "gripper": {
+    "scale": 50.32088,
+    "offset": 10.977
+  }
+}

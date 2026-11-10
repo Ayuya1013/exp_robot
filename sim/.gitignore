@@ -1,0 +1,9 @@
+﻿__pycache__/
+*.pyc
+*.mp4
+zero_pose.png
+cam_*.png
+ref_*.png
+tuned_*.png
+diag*.png
+scene*.png

@@ -25,12 +25,12 @@
 
 ## ファイル
 
-| ファイル | 中身 |
-|---|---|
-| `results.csv` | 全試行の結果(1 行 = 1 試行、Excel / Google スプレッドシートでそのまま開ける) |
+| ファイル                | 中身                                                                                                       |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `results.csv`           | 全試行の結果(1 行 = 1 試行、Excel / Google スプレッドシートでそのまま開ける)                               |
 | `logs/<日時>_<モデル>/` | `home.log`(ホーム移動)、`rollout.log`(lerobot-rollout の全出力と実行コマンド)、`trial.json`(記録した 1 行) |
-| `home_pose.json` | ホーム姿勢の関節角 |
-| `go_home.py` | ホーム姿勢への移動と保存 |
+| `home_pose.json`        | ホーム姿勢の関節角                                                                                         |
+| `go_home.py`            | ホーム姿勢への移動と保存                                                                                   |
 
 評価の動画は `~/.cache/huggingface/lerobot/local/rollout/<モデル名>/rollout_eval_<試行ID>/` に残り(`HF_LEROBOT_HOME` を設定していればその下の `local/rollout/`)、パスは `results.csv` の `dataset_dir` 列に書かれる。
 

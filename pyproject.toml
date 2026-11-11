@@ -447,6 +447,10 @@ ignore = [
 "benchmarks/**" = ["D"]
 "scripts/**" = ["D"]
 "setup.py" = ["D"]
+# Research scripts (MuJoCo sim, real-robot evaluation): not library code. Keep the bug-finding rules (E, W, F, B,
+# UP, I) but skip the library style rules: docstrings, math-style names (W, H, R), dict()/lambda style.
+"sim/**" = ["D", "N", "C4", "SIM", "E731"]
+"experiments/**" = ["D", "N", "C4", "SIM", "E731"]
 "src/lerobot/templates/**" = ["D"]
 # Vendored from transformers; keeps its upstream docstring style so syncs stay clean.
 "src/lerobot/policies/molmoact2/molmoact2_hf_model/**" = ["D"]
@@ -522,6 +526,7 @@ default.extend-ignore-identifiers-re = [
     "seperated_timestep",
     "nd",  # einsum output axes "...nd" in the vendored FLUX 3 Action transformer
     "EmbedND",
+    "solvePnP\\w*",  # OpenCV cv2.solvePnP / solvePnPRansac / solvePnPRefineLM
 ]
 default.extend-words = { nd = "nd" }
 

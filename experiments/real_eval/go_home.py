@@ -1,7 +1,7 @@
 """SO-101 follower をホーム姿勢へ動かす / ホーム姿勢を保存する。
 
-  python go_home.py --port COM4            : 保存済みのホーム姿勢へゆっくり移動(トルクは入れたまま終了)
-  python go_home.py --port COM4 --save     : トルクを切る → 手で腕を待機姿勢にする → Enter で保存
+python go_home.py --port COM4            : 保存済みのホーム姿勢へゆっくり移動(トルクは入れたまま終了)
+python go_home.py --port COM4 --save     : トルクを切る → 手で腕を待機姿勢にする → Enter で保存
 """
 
 import argparse

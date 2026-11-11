@@ -12,6 +12,7 @@
 1エピソードの流れ: 待機 → 関節空間でボタンの手前へ → 壁に向かってまっすぐ押す → 少し保持 → 手前へ戻る → 待機姿勢へ戻る。
 押し込みが足りない、または手先が壁やパネル(ボタンのまわり以外)にぶつかったエピソードは保存しない。
 """
+
 import argparse
 import json
 import math
@@ -20,32 +21,34 @@ import shutil
 import time
 
 import numpy as np
-
 import so101_sim as S
 
 # ===== 動きの設定 =====
 MOTION = dict(
     home=[0.0, -1.83, 1.58, 0.97, 0.0, 0.02],  # 待機姿勢 [rad]。check_alignment.py replay の「最初の姿勢」
     home_noise=[0.05, 0.03, 0.03, 0.05, 0.05, 0.02],
-    roll_press_deg=(-85.0, 4.0),  # 押すときの手首の回転 [度](平均, 標準偏差)。実機は押す瞬間に約 -82〜-88 度(カメラが爪の上)
-    tilt_deg=8.0,                 # 指先の向き: 水平から上下にこの角度以内でランダムに傾ける
-    aim_noise=0.003,              # ボタン中心からの狙いのずれ ± [m]
-    approach_h=(0.04, 0.08),      # 押す前に止まる位置(ボタン前面から手前へ)
-    extra_depth=0.003,            # 押し込みの目標をボタンの底よりこれだけ深くする
-    t_start=(0.3, 0.8),           # 最初の静止 [s]
-    t_reach=(1.5, 2.5),           # 待機姿勢 → ボタンの手前
-    t_down=(0.8, 1.3),            # 壁に向かって押す
-    t_hold=(0.2, 0.6),            # 押したまま
-    t_up=(0.6, 1.0),              # 手前へ戻る
-    t_home=(1.5, 2.5),            # 待機姿勢へ戻る
-    t_end=(0.5, 1.0),             # 最後の静止
+    roll_press_deg=(
+        -85.0,
+        4.0,
+    ),  # 押すときの手首の回転 [度](平均, 標準偏差)。実機は押す瞬間に約 -82〜-88 度(カメラが爪の上)
+    tilt_deg=8.0,  # 指先の向き: 水平から上下にこの角度以内でランダムに傾ける
+    aim_noise=0.003,  # ボタン中心からの狙いのずれ ± [m]
+    approach_h=(0.04, 0.08),  # 押す前に止まる位置(ボタン前面から手前へ)
+    extra_depth=0.003,  # 押し込みの目標をボタンの底よりこれだけ深くする
+    t_start=(0.3, 0.8),  # 最初の静止 [s]
+    t_reach=(1.5, 2.5),  # 待機姿勢 → ボタンの手前
+    t_down=(0.8, 1.3),  # 壁に向かって押す
+    t_hold=(0.2, 0.6),  # 押したまま
+    t_up=(0.6, 1.0),  # 手前へ戻る
+    t_home=(1.5, 2.5),  # 待機姿勢へ戻る
+    t_end=(0.5, 1.0),  # 最後の静止
 )
 # ======================
 
 
 def minjerk(n):
     t = np.linspace(0, 1, max(n, 2))
-    return 10 * t ** 3 - 15 * t ** 4 + 6 * t ** 5
+    return 10 * t**3 - 15 * t**4 + 6 * t**5
 
 
 def plan(sim, ik, rng, fps, mo):
@@ -74,7 +77,9 @@ def plan(sim, ik, rng, fps, mo):
     m_, s_ = mo["roll_press_deg"]  # 手首の回転はエピソードごとに決めて固定(IK は残りの関節で位置を合わせる)
     seed[4] = math.radians(m_ + s_ * float(np.clip(rng.normal(), -2.5, 2.5)))
     q_above, ep, ea = ik.solve(seed, p_above, d)
-    if ep > 0.002 or ea > math.radians(6):  # 手首を回すと指先の向きが数度ずれる(指先は回転軸から約8mm離れている)
+    if ep > 0.002 or ea > math.radians(
+        6
+    ):  # 手首を回すと指先の向きが数度ずれる(指先は回転軸から約8mm離れている)
         return None, home, None
     nf = lambda key: max(2, int(round(rng.uniform(*mo[key]) * fps)))
     traj = [home] * nf("t_start")
@@ -95,14 +100,19 @@ def plan(sim, ik, rng, fps, mo):
     s = minjerk(nf("t_home"))
     traj += [q + (home - q) * si for si in s]
     traj += [home] * nf("t_end")
-    info = dict(tilt_deg=round(math.degrees(t), 2), roll_deg=round(math.degrees(seed[4]), 1),
-                approach_mm=round(h_app * 1000, 1), aim_mm=[round(a_side * 1000, 2), round(a_up * 1000, 2)],
-                press_frame=i_press, frames=len(traj))
+    info = dict(
+        tilt_deg=round(math.degrees(t), 2),
+        roll_deg=round(math.degrees(seed[4]), 1),
+        approach_mm=round(h_app * 1000, 1),
+        aim_mm=[round(a_side * 1000, 2), round(a_up * 1000, 2)],
+        press_frame=i_press,
+        frames=len(traj),
+    )
     return np.array(traj), home, info
 
 
 def run(sim, traj, home, fps, on_frame=None):
-    """traj を実行する。on_frame があれば各フレームで (画像, 状態, 目標) を渡す。返り値: (押し込み量の最大, 衝突したか)"""
+    """Traj を実行する。on_frame があれば各フレームで (画像, 状態, 目標) を渡す。返り値: (押し込み量の最大, 衝突したか)"""
     sim.reset(home)
     max_depth, hit = 0.0, False
     for target in traj:
@@ -143,8 +153,11 @@ def default_features(cfg):
         "observation.state": {"dtype": "float32", "shape": (6,), "names": names},
     }
     for cam in ("wrist", "top"):
-        feats[f"observation.images.{cam}"] = {"dtype": "video", "shape": (cfg["img_h"], cfg["img_w"], 3),
-                                              "names": ["height", "width", "channels"]}
+        feats[f"observation.images.{cam}"] = {
+            "dtype": "video",
+            "shape": (cfg["img_h"], cfg["img_w"], 3),
+            "names": ["height", "width", "channels"],
+        }
     return feats
 
 
@@ -157,6 +170,7 @@ def make_sheet(sim, ik, rng, fps, args):
     """ランダム化の様子を確かめる一覧画像。成功するエピソードの「押す瞬間」の俯瞰と手先の画像を並べる。"""
     import cv2
     import imageio.v2 as imageio
+
     tiles, tried = [], 0
     while len(tiles) < args.sheet_n and tried < args.sheet_n * 5:
         tried += 1
@@ -177,13 +191,20 @@ def make_sheet(sim, ik, rng, fps, args):
         im = np.concatenate([frames["press"]["top"], frames["press"]["wrist"]], axis=1)
         im = cv2.resize(im, (640, 240))
         ok = "ok" if (not hit and depth >= 0.8 * sim.cfg["button_travel"]) else ("hit" if hit else "shallow")
-        cv2.putText(im, f"#{len(tiles)} {ok} light {params.get('light_intensity', 1):.2f}", (6, 18),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+        cv2.putText(
+            im,
+            f"#{len(tiles)} {ok} light {params.get('light_intensity', 1):.2f}",
+            (6, 18),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (255, 255, 0),
+            1,
+        )
         tiles.append(im)
     cols = 2
     while len(tiles) % cols:
         tiles.append(np.zeros_like(tiles[0]))
-    rows = [np.concatenate(tiles[i:i + cols], axis=1) for i in range(0, len(tiles), cols)]
+    rows = [np.concatenate(tiles[i : i + cols], axis=1) for i in range(0, len(tiles), cols)]
     imageio.imwrite(args.sheet, np.concatenate(rows, axis=0))
     print(f"一覧: {os.path.abspath(args.sheet)}(各マス 左: 俯瞰、右: 手先。押す瞬間)")
 
@@ -196,17 +217,30 @@ def main():
     ap.add_argument("--preview", default="", help="指定すると LeRobot には保存せず、この mp4 に動画を書く")
     ap.add_argument("--real_info", default="", help="実機データセットの meta/info.json")
     ap.add_argument("--repo_id", default="local/ac_power_sim")
-    ap.add_argument("--root", default="", help="保存先フォルダ(省略時は <HF_LEROBOT_HOME>/local/dataset/sim/<repo_id の / より後>)")
+    ap.add_argument(
+        "--root",
+        default="",
+        help="保存先フォルダ(省略時は <HF_LEROBOT_HOME>/local/dataset/sim/<repo_id の / より後>)",
+    )
     ap.add_argument("--task", default="Press the power button")
     ap.add_argument("--units", default="units.json")
     ap.add_argument("--overwrite", action="store_true", help="保存先があれば消して作り直す")
     ap.add_argument("--no_random_visual", action="store_true", help="色・照明・カメラのランダム化をしない")
-    ap.add_argument("--fixed_visual", action="store_true",
-                    help="見た目とカメラを較正した基準の値に固定する。乱数は --fixed_visual なしと同じだけ引くので、"
-                         "同じ --seed と --theta なら、パネルの位置・動き・保存されるエピソードがなしの場合と1本ずつ一致する")
-    ap.add_argument("--theta", type=float, default=1.0,
-                    help="ランダム化の強さ。so101_sim.py の RANDOM(θ=1 の標準偏差)を θ 倍する。0 でばらつきなし")
-    ap.add_argument("--sheet", default="", help="指定すると、押す瞬間の画像を並べた一覧(png)だけを作って終わる")
+    ap.add_argument(
+        "--fixed_visual",
+        action="store_true",
+        help="見た目とカメラを較正した基準の値に固定する。乱数は --fixed_visual なしと同じだけ引くので、"
+        "同じ --seed と --theta なら、パネルの位置・動き・保存されるエピソードがなしの場合と1本ずつ一致する",
+    )
+    ap.add_argument(
+        "--theta",
+        type=float,
+        default=1.0,
+        help="ランダム化の強さ。so101_sim.py の RANDOM(θ=1 の標準偏差)を θ 倍する。0 でばらつきなし",
+    )
+    ap.add_argument(
+        "--sheet", default="", help="指定すると、押す瞬間の画像を並べた一覧(png)だけを作って終わる"
+    )
     ap.add_argument("--sheet_n", type=int, default=12, help="--sheet で並べるエピソード数")
     args = ap.parse_args()
 
@@ -225,10 +259,14 @@ def main():
         if cam not in ("top", "wrist"):
             raise SystemExit(f"カメラ名 {cam} はシミュレーションにありません(top と wrist のみ)。")
     rng = np.random.default_rng(args.seed)
-    print(f"ランダム化の強さ θ = {args.theta}  乱数の種 {args.seed}"
-          + ("  見た目とカメラは基準に固定(--fixed_visual)" if args.fixed_visual else ""))
+    print(
+        f"ランダム化の強さ θ = {args.theta}  乱数の種 {args.seed}"
+        + ("  見た目とカメラは基準に固定(--fixed_visual)" if args.fixed_visual else "")
+    )
     if args.fixed_visual and args.no_random_visual:
-        raise SystemExit("--fixed_visual と --no_random_visual は一緒に使えません(乱数の引き方が変わります)。")
+        raise SystemExit(
+            "--fixed_visual と --no_random_visual は一緒に使えません(乱数の引き方が変わります)。"
+        )
 
     if args.sheet:
         make_sheet(sim, ik, rng, fps, args)
@@ -237,17 +275,22 @@ def main():
     writer, ds, log = None, None, None
     if args.preview:
         import imageio.v2 as imageio
+
         writer = imageio.get_writer(args.preview, fps=fps, macro_block_size=8)
     else:
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
-        home = os.environ.get("HF_LEROBOT_HOME", os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "lerobot"))
+
+        home = os.environ.get(
+            "HF_LEROBOT_HOME", os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "lerobot")
+        )
         root = args.root or os.path.join(home, "local", "dataset", "sim", args.repo_id.split("/")[-1])
         if os.path.exists(root):
             if not args.overwrite:
                 raise SystemExit(f"保存先が既にあります: {root}(作り直すなら --overwrite)")
             shutil.rmtree(root)
-        ds = LeRobotDataset.create(repo_id=args.repo_id, fps=fps, features=feats, root=root,
-                                   robot_type=robot_type, use_videos=True)
+        ds = LeRobotDataset.create(
+            repo_id=args.repo_id, fps=fps, features=feats, root=root, robot_type=robot_type, use_videos=True
+        )
         print(f"保存先: {root}")
         # エピソードごとのランダム化と動きの値を、データセットの隣に記録する(データセットの中には入れない)
         log_path = root.rstrip("/\\") + "_sim_params.jsonl"
@@ -276,8 +319,11 @@ def main():
                 if writer is not None:
                     writer.append_data(np.concatenate([imgs["top"], imgs["wrist"]], axis=1)[::2, ::2])
                     return
-                frame = {"observation.state": units.to_real(q)[order], "action": units.to_real(target)[order],
-                         "task": args.task}
+                frame = {
+                    "observation.state": units.to_real(q)[order],
+                    "action": units.to_real(target)[order],
+                    "task": args.task,
+                }
                 for key, cam in cams.items():
                     frame[key] = imgs[cam]
                 ds.add_frame(frame)
@@ -285,12 +331,25 @@ def main():
             run(sim, traj, home, fps, on_frame)
             if ds is not None:
                 ds.save_episode()
-                log.write(json.dumps(dict(episode=saved, seed=args.seed, depth_mm=round(depth * 1000, 2),
-                                          **params, motion=info), ensure_ascii=False) + "\n")
+                log.write(
+                    json.dumps(
+                        dict(
+                            episode=saved,
+                            seed=args.seed,
+                            depth_mm=round(depth * 1000, 2),
+                            **params,
+                            motion=info,
+                        ),
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
                 log.flush()
             saved += 1
-            print(f"[{saved}/{args.episodes}] {len(traj)} フレーム  押し込み {depth * 1000:.1f}mm  "
-                  f"試行 {tried}  失敗 {fails}  経過 {time.time() - t0:.0f}s")
+            print(
+                f"[{saved}/{args.episodes}] {len(traj)} フレーム  押し込み {depth * 1000:.1f}mm  "
+                f"試行 {tried}  失敗 {fails}  経過 {time.time() - t0:.0f}s"
+            )
     finally:
         if writer is not None:
             writer.close()

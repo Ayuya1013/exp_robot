@@ -14,17 +14,16 @@
 最後に、押した瞬間の指先(gripperframe)が、押す位置(press_target)からどれだけずれていたかを、パネルの向きで表示する。
 データセットは data/ と meta/ だけあればよい(videos/ は不要)。units.json があれば実機の値の変換に使う。
 """
+
 import argparse
 import glob
 import json
-import math
 import os
 import time
 
 import mujoco
 import numpy as np
 import pandas as pd
-
 import so101_sim as S
 
 
@@ -53,7 +52,8 @@ def episode_arrays(df, ep, order):
 
 def press_offset(sim, units, states):
     """指先が一番前(押す向き)に出たフレームで、指先が press_target からどれだけずれていたか。
-    返り値: (フレーム, [右, 上, 奥] mm)。右・上はパネルを正面から見た向き、奥は押し込む向き。"""
+    返り値: (フレーム, [右, 上, 奥] mm)。右・上はパネルを正面から見た向き、奥は押し込む向き。
+    """
     ik = S.IK(sim)
     mujoco.mj_forward(sim.m, sim.d)
     R = sim.d.xmat[sim.mount].reshape(3, 3)  # 列: パネルの x(右), y(奥), z(上)
@@ -82,7 +82,7 @@ def run_episode(sim, units, st, ac, fps, mode, on_frame=None):
             mujoco.mj_forward(m, d)
             hit = False
             top = sim.button_top()
-            for c in d.contact[:d.ncon]:  # ボタンから3cm以上離れた所で、腕がパネルや壁にめり込んだ深さ
+            for c in d.contact[: d.ncon]:  # ボタンから3cm以上離れた所で、腕がパネルや壁にめり込んだ深さ
                 pair = {c.geom1, c.geom2}
                 if pair & sim.dev_geoms and pair & sim.robot_geoms and np.linalg.norm(c.pos - top) > 0.03:
                     max_pen = max(max_pen, -c.dist)
@@ -96,14 +96,20 @@ def run_episode(sim, units, st, ac, fps, mode, on_frame=None):
             sim.set_lcd(True)
         if on_frame is not None and on_frame(k) is False:
             break
-    return dict(max_depth_mm=max_depth * 1000, first_press_s=first_press, hit_frames=hit_frames,
-                max_pen_mm=max_pen * 1000)
+    return dict(
+        max_depth_mm=max_depth * 1000,
+        first_press_s=first_press,
+        hit_frames=hit_frames,
+        max_pen_mm=max_pen * 1000,
+    )
 
 
 def report(ep, res, off, fps, mode):
     line = f"エピソード {ep:3d}: "
     if mode == "physics":
-        pressed = f"押せた({res['first_press_s']:.1f}秒)" if res["first_press_s"] is not None else "押せなかった"
+        pressed = (
+            f"押せた({res['first_press_s']:.1f}秒)" if res["first_press_s"] is not None else "押せなかった"
+        )
         line += f"{pressed}  押し込み最大 {res['max_depth_mm']:.1f}mm  ほかの所に当たったフレーム {res['hit_frames']}"
     else:  # 姿勢を置くだけなのでボタンは動かない。ボタン以外へのめり込みを見る
         line += f"ボタン以外にめり込んだフレーム {res['hit_frames']}(最大 {res['max_pen_mm']:.1f}mm)"
@@ -127,7 +133,9 @@ def main():
 
     df, order, fps = load_episodes(args.root)
     units = S.Units(args.units)
-    print(f"単位変換: {units.source}  /  エピソード数 {df['episode_index'].nunique()}  /  {fps}fps  /  モード {args.mode}")
+    print(
+        f"単位変換: {units.source}  /  エピソード数 {df['episode_index'].nunique()}  /  {fps}fps  /  モード {args.mode}"
+    )
     sim = S.Sim(args.model_dir, render=bool(args.video))
 
     # シミュで作ったデータなら、生成のときのパネルの位置のずれ(_sim_params.jsonl)を再現する
@@ -143,12 +151,16 @@ def main():
 
     def set_scene(ep):
         import env_builder as E
+
         r = sim_params.get(int(ep))
         if r is None:
             E.set_panel_pose(sim.m, base["panel_pos"], base["panel_rpy_deg"])
         else:
-            E.set_panel_pose(sim.m, np.array(base["panel_pos"]) + np.array(r["panel_dpos_mm"]) / 1000,
-                             np.array(base["panel_rpy_deg"]) + np.array(r["panel_drpy_deg"]))
+            E.set_panel_pose(
+                sim.m,
+                np.array(base["panel_pos"]) + np.array(r["panel_dpos_mm"]) / 1000,
+                np.array(base["panel_rpy_deg"]) + np.array(r["panel_drpy_deg"]),
+            )
         mujoco.mj_forward(sim.m, sim.d)
 
     if args.all:
@@ -161,9 +173,13 @@ def main():
             offs.append(off[1])
             report(ep, res, off, fps, args.mode)
         o = np.mean(offs, axis=0)
-        print(f"\n指先のずれの平均: 右{o[0]:+.0f} 上{o[1]:+.0f} 奥{o[2]:+.0f} mm(標準偏差 右{np.std(offs, 0)[0]:.0f} 上{np.std(offs, 0)[1]:.0f} mm)")
-        print("右と上の平均が大きく 0 からずれていれば、パネルの位置がずれている可能性がある"
-              "(指先の目印 gripperframe と、実際にボタンに当たる所は少し違うので、数mmの差は気にしなくてよい)。")
+        print(
+            f"\n指先のずれの平均: 右{o[0]:+.0f} 上{o[1]:+.0f} 奥{o[2]:+.0f} mm(標準偏差 右{np.std(offs, 0)[0]:.0f} 上{np.std(offs, 0)[1]:.0f} mm)"
+        )
+        print(
+            "右と上の平均が大きく 0 からずれていれば、パネルの位置がずれている可能性がある"
+            "(指先の目印 gripperframe と、実際にボタンに当たる所は少し違うので、数mmの差は気にしなくてよい)。"
+        )
         return
 
     set_scene(args.episode)
@@ -172,6 +188,7 @@ def main():
 
     if args.video:
         import imageio.v2 as imageio
+
         side = mujoco.Renderer(sim.m, sim.cfg["img_h"], sim.cfg["img_w"])
         cam = mujoco.MjvCamera()
         cam.lookat[:], cam.distance, cam.azimuth, cam.elevation = [0.16, -0.04, 0.17], 0.85, 90, -5
@@ -190,13 +207,14 @@ def main():
         print(f"動画: {os.path.abspath(args.video)}(左: 横から、中: top、右: wrist)")
     else:
         from mujoco import viewer as mj_viewer
+
         with mj_viewer.launch_passive(sim.m, sim.d) as v:
             while True:
                 t0 = time.time()
 
                 def on_frame(k):
                     v.sync()
-                    time.sleep(max(0.0, (k + 1) / (fps * args.speed) - (time.time() - t0)))
+                    time.sleep(max(0.0, (k + 1) / (fps * args.speed) - (time.time() - t0)))  # noqa: B023 (使うのは同じ回のループの中だけ)
                     return v.is_running()
 
                 res = run_episode(sim, units, st, ac, fps, args.mode, on_frame)

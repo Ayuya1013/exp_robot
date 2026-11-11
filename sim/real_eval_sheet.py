@@ -5,6 +5,7 @@
 
 失敗の種類の書き方: reach(届かない)/ offset(ずれて押せない)/ wrong(別のボタン)/ hit(壁やパネルに当たる)/ stuck(動かない・止まる)
 """
+
 import argparse
 import csv
 import os
@@ -18,7 +19,9 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default="real_eval_sheet.csv")
     args = ap.parse_args()
-    models = sorted(d for d in os.listdir(args.models) if os.path.exists(os.path.join(args.models, d, "config.json")))
+    models = sorted(
+        d for d in os.listdir(args.models) if os.path.exists(os.path.join(args.models, d, "config.json"))
+    )
     rng = random.Random(args.seed)
     rows, n = [], 0
     for r in range(1, args.rounds + 1):
@@ -26,8 +29,18 @@ def main():
         rng.shuffle(order)
         for m in order:
             n += 1
-            rows.append(dict(no=n, round=r, model=m, path=os.path.join(args.models, m),
-                             success="", t_press_s="", failure="", note=""))
+            rows.append(
+                dict(
+                    no=n,
+                    round=r,
+                    model=m,
+                    path=os.path.join(args.models, m),
+                    success="",
+                    t_press_s="",
+                    failure="",
+                    note="",
+                )
+            )
     with open(args.out, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()

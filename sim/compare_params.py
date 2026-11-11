@@ -6,6 +6,7 @@
   python compare_params.py $env:USERPROFILE\\.cache\\huggingface\\lerobot\\local\\dataset\\sim\\ac_power_sim_t1_sim_params.jsonl `
                            $env:USERPROFILE\\.cache\\huggingface\\lerobot\\local\\dataset\\sim\\ac_power_sim_vis0_sim_params.jsonl
 """
+
 import json
 import sys
 
@@ -39,7 +40,9 @@ def main():
         print(f"OK: {n} 本すべて、パネルの位置・向き・動き・押し込み量が一致しました。")
     else:
         print(f"一致しないエピソードが {bad} 本あります(最初の5本だけ表示)。")
-        print("1本目からずれるなら、--seed・--theta か、MOTION・RANDOM・random.json が t1 の生成時と違う可能性があります。")
+        print(
+            "1本目からずれるなら、--seed・--theta か、MOTION・RANDOM・random.json が t1 の生成時と違う可能性があります。"
+        )
 
 
 if __name__ == "__main__":

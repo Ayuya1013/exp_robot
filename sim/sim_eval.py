@@ -20,21 +20,24 @@ policy_preprocessor.json など)を順に評価する。
 成功: 「運転/停止」が押し込みの80%以上沈み、ほかのボタンは沈んでいない。
 失敗の種類: wrong_button(別のボタンを押した)、collision(ボタン以外に当たった、指先が範囲外)、timeout(時間内に押せない)。
 """
+
 import argparse
 import csv
 import json
-import math
 import os
 import time
 
-import numpy as np
-
 import gen_sim_dataset as G
+import numpy as np
 import so101_sim as S
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LEROBOT_HOME = os.environ.get("HF_LEROBOT_HOME", os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "lerobot"))
-SIM_EVAL_ROOT = os.path.join(LEROBOT_HOME, "local", "rollout", "sim_eval")  # 実機の評価(rollout/<モデル>/)と並べて置く
+LEROBOT_HOME = os.environ.get(
+    "HF_LEROBOT_HOME", os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "lerobot")
+)
+SIM_EVAL_ROOT = os.path.join(
+    LEROBOT_HOME, "local", "rollout", "sim_eval"
+)  # 実機の評価(rollout/<モデル>/)と並べて置く
 
 
 class PolicyRunner:
@@ -42,15 +45,22 @@ class PolicyRunner:
 
     def __init__(self, path, device="cpu", task="Press the power button"):
         import torch
+
         from lerobot.configs.policies import PreTrainedConfig
-        from lerobot.policies import get_policy_class, make_pre_post_processors, prepare_observation_for_inference
+        from lerobot.policies import (
+            get_policy_class,
+            make_pre_post_processors,
+            prepare_observation_for_inference,
+        )
+
         self.torch, self.prep = torch, prepare_observation_for_inference
         cfg = PreTrainedConfig.from_pretrained(path)
         cfg.device = device
         self.policy = get_policy_class(cfg.type).from_pretrained(path, config=cfg)
         self.policy.eval()
         self.pre, self.post = make_pre_post_processors(
-            cfg, pretrained_path=path, preprocessor_overrides={"device_processor": {"device": device}})
+            cfg, pretrained_path=path, preprocessor_overrides={"device_processor": {"device": device}}
+        )
         self.device = torch.device(device)
         self.task = task
         self.image_keys = [k for k in cfg.input_features if k.startswith("observation.images.")]
@@ -101,9 +111,17 @@ def run_episode(sim, units, runner, home, fps, max_s, buttons, target="power", o
     travel = sim.cfg["button_travel"]
     runner.reset()  # お手本の計画は内部で腕を動かすので、先に済ませてから初期化する
     sim.reset(home)
-    res = dict(success=False, t_press=None, reason="timeout", first_hit=None, wrong=None, max_depth_mm=0.0,
-               min_dist_mm=1e9)
+    res = dict(
+        success=False,
+        t_press=None,
+        reason="timeout",
+        first_hit=None,
+        wrong=None,
+        max_depth_mm=0.0,
+        min_dist_mm=1e9,
+    )
     import check_alignment as C
+
     for k in range(int(max_s * fps)):
         imgs = sim.render()
         if on_frame:
@@ -125,7 +143,9 @@ def run_episode(sim, units, runner, home, fps, max_s, buttons, target="power", o
         if res["wrong"] is not None:
             break
     if not res["success"]:
-        res["reason"] = "wrong_button" if res["wrong"] else ("collision" if res["first_hit"] is not None else "timeout")
+        res["reason"] = (
+            "wrong_button" if res["wrong"] else ("collision" if res["first_hit"] is not None else "timeout")
+        )
     else:
         res["reason"] = "ok"
     res["min_dist_mm"] = round(res["min_dist_mm"], 1)
@@ -135,8 +155,11 @@ def run_episode(sim, units, runner, home, fps, max_s, buttons, target="power", o
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--models", default=os.path.join(os.path.dirname(HERE), "models"),
-                    help="評価するモデルのフォルダが入ったフォルダ")
+    ap.add_argument(
+        "--models",
+        default=os.path.join(os.path.dirname(HERE), "models"),
+        help="評価するモデルのフォルダが入ったフォルダ",
+    )
     ap.add_argument("--only", nargs="*", default=None, help="この名前を含むモデルだけ評価する")
     ap.add_argument("--stub", action="store_true", help="方策の代わりにお手本(IK)で動かす(仕組みの確認)")
     ap.add_argument("--thetas", type=float, nargs="+", default=[0.0, 1.0, 2.0])
@@ -146,15 +169,27 @@ def main():
     ap.add_argument("--fps", type=int, default=30)
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--video_n", type=int, default=0, help="各モデル・各 θ の最初の n エピソードを動画にする")
-    ap.add_argument("--shard", default="0/1",
-                    help="k/n:エピソード番号を n で割った余りが k のものだけ評価する(n 個のプロセスで並列に回す)")
+    ap.add_argument(
+        "--shard",
+        default="0/1",
+        help="k/n:エピソード番号を n で割った余りが k のものだけ評価する(n 個のプロセスで並列に回す)",
+    )
     ap.add_argument("--task", default="Press the power button", help="言語の指示(smolVLA などで使う)")
-    ap.add_argument("--fixed_visual", action="store_true",
-                    help="見た目(色・照明・カメラ)を較正した値に固定し、パネルの位置と動きだけ θ でばらつかせる(vis0 と同じ条件)")
-    ap.add_argument("--name", default="act", help=f"評価のまとまりの名前。結果は {SIM_EVAL_ROOT}/<name>/ に保存する")
+    ap.add_argument(
+        "--fixed_visual",
+        action="store_true",
+        help="見た目(色・照明・カメラ)を較正した値に固定し、パネルの位置と動きだけ θ でばらつかせる(vis0 と同じ条件)",
+    )
+    ap.add_argument(
+        "--name", default="act", help=f"評価のまとまりの名前。結果は {SIM_EVAL_ROOT}/<name>/ に保存する"
+    )
     ap.add_argument("--out", default="", help="保存先フォルダを直接指定する(省略時は --name から決める)")
-    ap.add_argument("--summary_only", action="store_true", help="評価はせず、out の結果をまとめて表にするだけ")
-    ap.add_argument("--model_dir", default=os.path.join(os.path.expanduser("~"), "SO-ARM100", "Simulation", "SO101"))
+    ap.add_argument(
+        "--summary_only", action="store_true", help="評価はせず、out の結果をまとめて表にするだけ"
+    )
+    ap.add_argument(
+        "--model_dir", default=os.path.join(os.path.expanduser("~"), "SO-ARM100", "Simulation", "SO101")
+    )
     args = ap.parse_args()
     args.out = args.out or os.path.join(SIM_EVAL_ROOT, args.name)
     print(f"保存先: {args.out}")
@@ -165,8 +200,11 @@ def main():
     if args.stub:
         models = [("stub_ik", None)]
     else:
-        models = sorted((d, os.path.join(args.models, d)) for d in os.listdir(args.models)
-                        if os.path.exists(os.path.join(args.models, d, "config.json")))
+        models = sorted(
+            (d, os.path.join(args.models, d))
+            for d in os.listdir(args.models)
+            if os.path.exists(os.path.join(args.models, d, "config.json"))
+        )
         if args.only:
             models = [m for m in models if any(o in m[0] for o in args.only)]
     if not models:
@@ -182,8 +220,23 @@ def main():
         with open(csv_path, newline="", encoding="utf-8") as f:
             for r in csv.DictReader(f):
                 done.add((r["model"], float(r["theta"]), int(r["episode"])))
-    fields = ["model", "theta", "episode", "seed", "success", "reason", "t_press", "first_hit", "wrong",
-              "max_depth_mm", "min_dist_mm", "panel_dpos_mm", "panel_drpy_deg", "light_intensity", "wall_s"]
+    fields = [
+        "model",
+        "theta",
+        "episode",
+        "seed",
+        "success",
+        "reason",
+        "t_press",
+        "first_hit",
+        "wrong",
+        "max_depth_mm",
+        "min_dist_mm",
+        "panel_dpos_mm",
+        "panel_drpy_deg",
+        "light_intensity",
+        "wall_s",
+    ]
     new_file = not os.path.exists(csv_path)
     fcsv = open(csv_path, "a", newline="", encoding="utf-8")
     writer = csv.DictWriter(fcsv, fieldnames=fields)
@@ -194,7 +247,11 @@ def main():
         sim = S.Sim(args.model_dir)
         units = S.Units(os.path.join(HERE, "units.json"))
         buttons = button_joints(sim)
-        runner = StubRunner(sim, S.IK(sim), units, args.fps) if args.stub else PolicyRunner(path, args.device, args.task)
+        runner = (
+            StubRunner(sim, S.IK(sim), units, args.fps)
+            if args.stub
+            else PolicyRunner(path, args.device, args.task)
+        )
         for th in args.thetas:
             sim.theta = th
             # θ=0 は場面も初期姿勢も毎回同じで、ACT の推論も決定的なので、1回で十分
@@ -209,29 +266,54 @@ def main():
                 params = sim.randomize(rng)
                 if args.fixed_visual:  # 乱数は同じだけ引いたうえで、見た目だけ基準に戻す(gen_sim_dataset.py --fixed_visual と同じ方式)
                     if not hasattr(sim, "restore_visual"):
-                        raise SystemExit("so101_sim.py に Sim.restore_visual() がありません(vis0 を作ったときの版に更新してください)")
+                        raise SystemExit(
+                            "so101_sim.py に Sim.restore_visual() がありません(vis0 を作ったときの版に更新してください)"
+                        )
                     sim.restore_visual()
-                home = np.array(G.MOTION["home"]) + rng.normal(0, 1, 6) * np.array(G.MOTION["home_noise"]) * th
+                home = (
+                    np.array(G.MOTION["home"]) + rng.normal(0, 1, 6) * np.array(G.MOTION["home_noise"]) * th
+                )
                 writer_v = None
                 if ep < args.video_n:
                     import imageio.v2 as imageio
+
                     os.makedirs(os.path.join(args.out, "videos"), exist_ok=True)
                     vp = os.path.join(args.out, "videos", f"{name}_t{th:g}_ep{ep:02d}.mp4")
                     writer_v = imageio.get_writer(vp, fps=args.fps, macro_block_size=1)
-                on_frame = (lambda im: writer_v.append_data(np.concatenate([im["top"], im["wrist"]], 1))) if writer_v else None
+                on_frame = (
+                    (lambda im: writer_v.append_data(np.concatenate([im["top"], im["wrist"]], 1)))  # noqa: B023 (使うのは同じ回のループの中だけ)
+                    if writer_v
+                    else None
+                )
                 t0 = time.time()
                 res = run_episode(sim, units, runner, home, args.fps, args.max_s, buttons, on_frame=on_frame)
                 if writer_v:
                     writer_v.close()
-                writer.writerow(dict(model=name, theta=th, episode=ep, seed=seed, success=int(res["success"]),
-                                     reason=res["reason"], t_press=res["t_press"], first_hit=res["first_hit"],
-                                     wrong=res["wrong"], max_depth_mm=res["max_depth_mm"], min_dist_mm=res["min_dist_mm"],
-                                     panel_dpos_mm=json.dumps(params["panel_dpos_mm"]),
-                                     panel_drpy_deg=json.dumps(params["panel_drpy_deg"]),
-                                     light_intensity=params.get("light_intensity"), wall_s=round(time.time() - t0, 1)))
+                writer.writerow(
+                    dict(
+                        model=name,
+                        theta=th,
+                        episode=ep,
+                        seed=seed,
+                        success=int(res["success"]),
+                        reason=res["reason"],
+                        t_press=res["t_press"],
+                        first_hit=res["first_hit"],
+                        wrong=res["wrong"],
+                        max_depth_mm=res["max_depth_mm"],
+                        min_dist_mm=res["min_dist_mm"],
+                        panel_dpos_mm=json.dumps(params["panel_dpos_mm"]),
+                        panel_drpy_deg=json.dumps(params["panel_drpy_deg"]),
+                        light_intensity=params.get("light_intensity"),
+                        wall_s=round(time.time() - t0, 1),
+                    )
+                )
                 fcsv.flush()
-                print(f"{name} θ={th:g} #{ep:02d}: {res['reason']:12s} 押すまで {res['t_press']}s  "
-                      f"一番近づいた {res['min_dist_mm']}mm  ({time.time() - t0:.0f}s)", flush=True)
+                print(
+                    f"{name} θ={th:g} #{ep:02d}: {res['reason']:12s} 押すまで {res['t_press']}s  "
+                    f"一番近づいた {res['min_dist_mm']}mm  ({time.time() - t0:.0f}s)",
+                    flush=True,
+                )
     fcsv.close()
     summarize(args.out, os.path.join(args.out, "sim_eval_summary.csv"))
 
@@ -239,6 +321,7 @@ def main():
 def summarize(out_dir, out_path):
     """out_dir の sim_eval_results*.csv(並列に回した分も含む)をまとめて表にする。"""
     import glob
+
     rows = []
     for p in sorted(glob.glob(os.path.join(out_dir, "sim_eval_results*.csv"))):
         with open(p, newline="", encoding="utf-8") as f:

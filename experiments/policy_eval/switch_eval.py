@@ -5,6 +5,7 @@
   CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=2 python switch_eval.py
   CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=2 python switch_eval.py --episodes 0 6 12 17 --step 5
 """
+
 import argparse
 import time
 from pathlib import Path
@@ -30,8 +31,10 @@ args = p.parse_args()
 dev = "cuda"
 out = Path(args.out)
 out.mkdir(parents=True, exist_ok=True)
-RENAME_SMOLVLA = {"observation.images.top": "observation.images.camera1",
-                  "observation.images.wrist": "observation.images.camera2"}
+RENAME_SMOLVLA = {
+    "observation.images.top": "observation.images.camera1",
+    "observation.images.wrist": "observation.images.camera2",
+}
 
 ds = LeRobotDataset("local/ac_power_button", root=args.dataset_root)
 names = [n.removesuffix(".pos") for n in ds.meta.features["action"]["names"]]
@@ -41,9 +44,12 @@ J = [i for i, n in enumerate(names) if n != "gripper"]
 def load(policy_type, path):
     pol = get_policy_class(policy_type).from_pretrained(path).to(dev)
     pre, post = make_pre_post_processors(
-        pol.config, pretrained_path=path,
-        preprocessor_overrides={"device_processor": {"device": dev},
-                                "rename_observations_processor": {"rename_map": {}}},
+        pol.config,
+        pretrained_path=path,
+        preprocessor_overrides={
+            "device_processor": {"device": dev},
+            "rename_observations_processor": {"rename_map": {}},
+        },
         postprocessor_overrides={"device_processor": {"device": dev}},
     )
     return pol, pre, post
@@ -77,7 +83,7 @@ def save_grid(ep, frames, labels, path):
     W, H, pad = 320, 240, 22
     grid = Image.new("RGB", (W * len(frames), (H + pad) * 2), "white")
     d = ImageDraw.Draw(grid)
-    for c, (item, lab) in enumerate(zip(frames, labels)):
+    for c, (item, lab) in enumerate(zip(frames, labels, strict=False)):
         for r, key in enumerate(("observation.images.top", "observation.images.wrist")):
             grid.paste(to_pil(item[key]), (c * W, r * (H + pad) + pad))
             d.text((c * W + 4, r * (H + pad) + 4), f"ep{ep} {lab} [{key.split('.')[-1]}]", fill="black")
@@ -97,7 +103,7 @@ for ep in args.episodes:
     sw = {"gt": None, "act": None, "smol": None}
     for k in list(range(0, onset + 1, args.step)):
         item = ds[lo + k]
-        g = move(A[k:k + 50])
+        g = move(A[k : k + 50])
         a = move(predict(*act, item)[:50])
         sm = []
         for s in range(args.seeds):
@@ -107,7 +113,9 @@ for ep in args.episodes:
             if sw[name] is None and v > args.go:
                 sw[name] = k
         print(f"  {k:6d}  {g:9.1f}  {a:9.1f}  [{' '.join(f'{x:.1f}' for x in sm)}]")
-    print(f"  切り替わり(動きが{args.go}度を超えた最初のフレーム): 正解={sw['gt']}  ACT={sw['act']}  SmolVLA={sw['smol']}")
+    print(
+        f"  切り替わり(動きが{args.go}度を超えた最初のフレーム): 正解={sw['gt']}  ACT={sw['act']}  SmolVLA={sw['smol']}"
+    )
     keys = [0] + [v for v in (sw["act"], sw["smol"]) if v is not None] + [max(onset - 30, 0), onset]
     keys = sorted(set(keys))
     labels = []

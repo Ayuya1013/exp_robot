@@ -4,14 +4,14 @@
 ここでは、それを動かすためのクラス(Sim)、IK、実機の値との単位変換(Units)を持つ。
 座標系: ロボットの土台が原点、+x が正面、+z が上。単位は m とラジアン。
 """
+
 import json
 import math
 import os
 
+import env_builder as E
 import mujoco
 import numpy as np
-
-import env_builder as E
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JOINTS = E.JOINTS
@@ -26,34 +26,45 @@ IK_JOINTS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex"]  # IK 
 # random.json があれば上書きする。色の中心は colors.json(camcal.py colors で実画像から作る)
 RANDOM = dict(
     # 正規分布(標準偏差)
-    panel_pos_m=[0.005, 0.008, 0.008],   # パネル(と壁)の位置 x, y, z。ロボットの置き直しのずれ程度
-    panel_rpy_deg=[0.0, 0.7, 1.0],       # パネルの向き。実機の壁は台と平行なので小さく
-    top_cam_pos_m=0.004, top_cam_rot_deg=0.5, top_cam_fovy_deg=0.4,
-    wrist_cam_pos_m=0.002, wrist_cam_rot_deg=1.0, wrist_cam_fovy_deg=0.5,  # 手先は較正の残りのずれ(約1度)程度
+    panel_pos_m=[0.005, 0.008, 0.008],  # パネル(と壁)の位置 x, y, z。ロボットの置き直しのずれ程度
+    panel_rpy_deg=[0.0, 0.7, 1.0],  # パネルの向き。実機の壁は台と平行なので小さく
+    top_cam_pos_m=0.004,
+    top_cam_rot_deg=0.5,
+    top_cam_fovy_deg=0.4,
+    wrist_cam_pos_m=0.002,
+    wrist_cam_rot_deg=1.0,
+    wrist_cam_fovy_deg=0.5,  # 手先は較正の残りのずれ(約1度)程度
     # 対数一様分布(倍率 r: θ=1 で 1/r〜r 倍)
-    brightness_ratio=1.25,               # 部品ごとの色の明るさ(0.8〜1.25 倍)
-    light_ratio=1.6,                     # 照明の強さ(0.63〜1.6 倍)
-    headlight_ratio=1.33,                # 全体の明るさ(0.75〜1.33 倍)
+    brightness_ratio=1.25,  # 部品ごとの色の明るさ(0.8〜1.25 倍)
+    light_ratio=1.6,  # 照明の強さ(0.63〜1.6 倍)
+    headlight_ratio=1.33,  # 全体の明るさ(0.75〜1.33 倍)
     # 一様分布(幅 ±w)
-    hue=0.06,                            # 部品ごとの色味(R, G, B を別々に、倍率の ±)
-    light_pos_m=0.20,                    # 照明の位置
+    hue=0.06,  # 部品ごとの色味(R, G, B を別々に、倍率の ±)
+    light_pos_m=0.20,  # 照明の位置
 )
 CFG = dict(img_w=640, img_h=480)  # 実データの info.json があれば、その大きさに合わせる
 # =====================================
 
 
-ROBOT_PART_RGB = [0.90, 0.90, 0.88]  # 実機の3Dプリント部品は白(モデルの黄色のままにしない)。colors.json の robot_parts で上書き
+ROBOT_PART_RGB = [
+    0.90,
+    0.90,
+    0.88,
+]  # 実機の3Dプリント部品は白(モデルの黄色のままにしない)。colors.json の robot_parts で上書き
 
 
 def apply_colors(m, path):
     """基準の色を決める。3Dプリント部品(モデルで黄色の材質)は白にし、colors.json(geom の名前 → RGB)があれば上書きする。
-    返り値: 使ったファイルか None"""
+    返り値: 使ったファイルか None
+    """
     colors = {}
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
             colors = json.load(f)
     part = colors.get("robot_parts", ROBOT_PART_RGB)
-    for i in range(m.nmat):  # モデルの黄色(1, 0.82, 0.12)の材質 = 3Dプリント部品。モーターやカメラ基板(黒)はそのまま
+    for i in range(
+        m.nmat
+    ):  # モデルの黄色(1, 0.82, 0.12)の材質 = 3Dプリント部品。モーターやカメラ基板(黒)はそのまま
         if np.allclose(m.mat_rgba[i, :3], [1.0, 0.82, 0.12], atol=0.02):
             m.mat_rgba[i, :3] = part
     for name, rgb in colors.items():
@@ -68,8 +79,12 @@ def apply_colors(m, path):
 
 def robot_part_materials(m):
     """3Dプリント部品の材質の番号(色を合わせるときに使う)。"""
-    return [i for i in range(m.nmat) if m.material(i).name.endswith("_material")
-            and not m.material(i).name.startswith(("sts3215", "wrist_camera_so101"))]
+    return [
+        i
+        for i in range(m.nmat)
+        if m.material(i).name.endswith("_material")
+        and not m.material(i).name.startswith(("sts3215", "wrist_camera_so101"))
+    ]
 
 
 def load_random(path=os.path.join(HERE, "random.json")):
@@ -84,14 +99,17 @@ def find_model_xml(model_dir):
     p = os.path.join(model_dir, "so101_new_calib.xml")
     if not os.path.exists(p):
         raise FileNotFoundError(
-            f"{p} がありません。SO-ARM100 を git clone して、Simulation/SO101 のフォルダを指定してください。")
+            f"{p} がありません。SO-ARM100 を git clone して、Simulation/SO101 のフォルダを指定してください。"
+        )
     return p
 
 
 class Sim:
     """env_builder.py のシーンを動かす。パネル位置のランダム化、押し込みの判定、2カメラの描画。"""
 
-    def __init__(self, model_dir, cfg=None, render=True, units_path=os.path.join(HERE, "units.json"), theta=1.0):
+    def __init__(
+        self, model_dir, cfg=None, render=True, units_path=os.path.join(HERE, "units.json"), theta=1.0
+    ):
         self.cfg = dict(CFG, **(cfg or {}))
         self.theta = theta
         self.rand = load_random()
@@ -115,13 +133,24 @@ class Sim:
         self.target_geom = m.geom(f"panel/geom_{btn}").id
         panel_bodies = {i for i in range(m.nbody) if m.body(i).name.startswith("panel")}
         # 押すボタン以外のパネルと壁(ほかのボタンも含む)
-        self.dev_geoms = {i for i in range(m.ngeom) if m.geom_bodyid[i] in panel_bodies and i != self.target_geom}
-        self.robot_geoms = {i for i in range(m.ngeom) if m.geom_bodyid[i] not in panel_bodies and m.geom_bodyid[i] != 0}
+        self.dev_geoms = {
+            i for i in range(m.ngeom) if m.geom_bodyid[i] in panel_bodies and i != self.target_geom
+        }
+        self.robot_geoms = {
+            i for i in range(m.ngeom) if m.geom_bodyid[i] not in panel_bodies and m.geom_bodyid[i] != 0
+        }
         self.tcp_box = self.env["limits"].get("tcp_box")
         self.colors_source = apply_colors(m, os.path.join(HERE, "colors.json"))
-        self._base = dict(cam_pos=m.cam_pos.copy(), cam_quat=m.cam_quat.copy(), cam_fovy=m.cam_fovy.copy(), geom_rgba=m.geom_rgba.copy(),
-                          mat_rgba=m.mat_rgba.copy(), light_diffuse=m.light_diffuse.copy(),
-                          light_pos=m.light_pos.copy(), headlight=m.vis.headlight.diffuse.copy())
+        self._base = dict(
+            cam_pos=m.cam_pos.copy(),
+            cam_quat=m.cam_quat.copy(),
+            cam_fovy=m.cam_fovy.copy(),
+            geom_rgba=m.geom_rgba.copy(),
+            mat_rgba=m.mat_rgba.copy(),
+            light_diffuse=m.light_diffuse.copy(),
+            light_pos=m.light_pos.copy(),
+            headlight=m.vis.headlight.diffuse.copy(),
+        )
         self._lcd_off = m.geom_rgba[self.lcd_geom].copy()
         mujoco.mj_forward(m, self.d)
         self.renderer = mujoco.Renderer(m, c["img_h"], c["img_w"]) if render else None
@@ -155,7 +184,8 @@ class Sim:
     def step(self, target, dt, near=0.03):
         """関節目標 target を与えて dt 秒進める。
         押すボタンから near [m] より離れた所で、ロボットが壁・パネル・ほかのボタンに当たるか、
-        指先が tcp_box の外に出たら True を返す。"""
+        指先が tcp_box の外に出たら True を返す。
+        """
         self.d.ctrl[self.act] = target
         hit = False
         top = self.button_top()
@@ -164,7 +194,9 @@ class Sim:
             for k in range(self.d.ncon):
                 c = self.d.contact[k]
                 g1, g2 = c.geom1, c.geom2
-                if (g1 in self.dev_geoms and g2 in self.robot_geoms) or (g2 in self.dev_geoms and g1 in self.robot_geoms):
+                if (g1 in self.dev_geoms and g2 in self.robot_geoms) or (
+                    g2 in self.dev_geoms and g1 in self.robot_geoms
+                ):
                     if np.linalg.norm(c.pos - top) > near:
                         hit = True
         if not E.tcp_in_box(self.m, self.d, self.tcp_box):
@@ -191,10 +223,14 @@ class Sim:
         p = self.env["panel"]
         d_pos, d_rpy = g(R["panel_pos_m"], 3), g(R["panel_rpy_deg"], 3)
         E.set_panel_pose(m, np.array(p["panel_pos"]) + d_pos, np.array(p["panel_rpy_deg"]) + d_rpy)
-        params = dict(theta=th, panel_dpos_mm=(d_pos * 1000).round(2).tolist(), panel_drpy_deg=d_rpy.round(3).tolist())
+        params = dict(
+            theta=th, panel_dpos_mm=(d_pos * 1000).round(2).tolist(), panel_drpy_deg=d_rpy.round(3).tolist()
+        )
         if visual:
+
             def jitter(rgb):  # 明るさ(対数一様の倍率)と色味(R, G, B を別々に、一様)を変える
                 return np.clip(rgb * logu(R["brightness_ratio"]) * (1 + u(R["hue"], 3)), 0, 1)
+
             m.geom_rgba[:] = b["geom_rgba"]
             for gid in range(m.ngeom):  # 材質のないもの(壁・パネルなど)は geom の色を変える
                 if m.geom_matid[gid] < 0:
@@ -220,17 +256,19 @@ class Sim:
                 m.cam_pos[cid] = b["cam_pos"][cid] + dp
                 m.cam_quat[cid] = q
                 m.cam_fovy[cid] = b["cam_fovy"][cid] + df
-                params[f"{name}_cam"] = dict(dpos_mm=(dp * 1000).round(2).tolist(),
-                                             drot_deg=round(float(np.degrees(np.linalg.norm(rv))), 3),
-                                             dfovy_deg=round(float(df), 3))
+                params[f"{name}_cam"] = dict(
+                    dpos_mm=(dp * 1000).round(2).tolist(),
+                    drot_deg=round(float(np.degrees(np.linalg.norm(rv))), 3),
+                    dfovy_deg=round(float(df), 3),
+                )
         mujoco.mj_forward(m, self.d)
         return params
-
 
     def restore_visual(self):
         """見た目(色・明るさ・照明)とカメラ(位置・向き・画角)を、較正した基準の値に戻す。
         randomize() のあとに呼ぶと、乱数は同じだけ引いたまま、見た目のばらつきだけを消せる
-        (パネルの位置と動きは、呼ばない場合とまったく同じになる)。"""
+        (パネルの位置と動きは、呼ばない場合とまったく同じになる)。
+        """
         m, b = self.m, self._base
         m.geom_rgba[:] = b["geom_rgba"]
         m.mat_rgba[:] = b["mat_rgba"]
@@ -278,7 +316,7 @@ class IK:
             P = np.eye(3) - np.outer(a, a)
             J = np.vstack([jp[:, self.dofs], w_rot * P @ jr[:, self.dofs]])
             e = np.concatenate([ep, w_rot * er])
-            dq = J.T @ np.linalg.solve(J @ J.T + lam ** 2 * np.eye(6), e)
+            dq = J.T @ np.linalg.solve(J @ J.T + lam**2 * np.eye(6), e)
             dq = np.clip(dq, -0.2, 0.2)
             q[:n] = np.clip(q[:n] + dq, self.lo, self.hi)
         p, a = self.fk(q)

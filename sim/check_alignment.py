@@ -17,6 +17,7 @@
   出力: replay_ep0.mp4(左上: 実機の top、右上: シミュレーションの top、左下: 2つを重ねたもの、右下: 横から見たシミュレーション)
   あわせて、最初の姿勢(gen_sim_dataset.py の home に使う値)と、関節が可動範囲を超えていないかを表示する。
 """
+
 import argparse
 import json
 import math
@@ -25,18 +26,19 @@ import re
 import threading
 import time
 
+import env_builder as E
 import mujoco
 import numpy as np
-
-import env_builder as E
 import so101_sim as S
 
 SIM_GRIPPER_CLOSED, SIM_GRIPPER_OPEN = -0.17453, 1.74533
 
 
 def save_units(units, path):
-    data = {j: {"scale": round(float(units.scale[i]), 5), "offset": round(float(units.offset[i]), 3)}
-            for i, j in enumerate(S.JOINTS)}
+    data = {
+        j: {"scale": round(float(units.scale[i]), 5), "offset": round(float(units.offset[i]), 3)}
+        for i, j in enumerate(S.JOINTS)
+    }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     print(f"保存しました: {os.path.abspath(path)}")
@@ -59,6 +61,7 @@ def side_option():
 def save_zero_pose_png(sim, path="zero_pose.png"):
     """シミュレーションの q=0(各関節が可動範囲の中央)の姿勢を、横と正面から描いて保存する。"""
     import imageio.v2 as imageio
+
     sim.reset(np.zeros(6))
     r = mujoco.Renderer(sim.m, 360, 480)
     imgs = []
@@ -73,16 +76,18 @@ def save_zero_pose_png(sim, path="zero_pose.png"):
 
 
 # ---------------- live ----------------
-HELP = ("コマンド(入力して Enter):\n"
-        "  Enter だけ     … 今の値を表示\n"
-        "  zero           … 3秒後に基準の姿勢(L字)を記録。入力したらすぐ両手で腕を支えて形を作る\n"
-        "  flip 関節名     … その関節の向きを反対にする(例: flip elbow_flex)\n"
-        "  gclose / gopen … 3秒後にグリッパーの閉/開を記録\n"
-        "  --- パネルの位置合わせ(固定側の爪の先を使う) ---\n"
-        "  btn            … 3秒後、爪の先を当てている所を「運転/停止」の前面の中心として、パネルを置き直す\n"
-        "  move dx dy dz  … パネルを動かす [mm](前、左、上)。例: move 0 0 -3\n"
-        "  wall           … 3秒後、爪の先を当てている壁の位置を測り、ボタンの面からの奥行きを表示する\n"
-        "  save           … units.json と panel.json に保存     q … 終了")
+HELP = (
+    "コマンド(入力して Enter):\n"
+    "  Enter だけ     … 今の値を表示\n"
+    "  zero           … 3秒後に基準の姿勢(L字)を記録。入力したらすぐ両手で腕を支えて形を作る\n"
+    "  flip 関節名     … その関節の向きを反対にする(例: flip elbow_flex)\n"
+    "  gclose / gopen … 3秒後にグリッパーの閉/開を記録\n"
+    "  --- パネルの位置合わせ(固定側の爪の先を使う) ---\n"
+    "  btn            … 3秒後、爪の先を当てている所を「運転/停止」の前面の中心として、パネルを置き直す\n"
+    "  move dx dy dz  … パネルを動かす [mm](前、左、上)。例: move 0 0 -3\n"
+    "  wall           … 3秒後、爪の先を当てている壁の位置を測り、ボタンの面からの奥行きを表示する\n"
+    "  save           … units.json と panel.json に保存     q … 終了"
+)
 
 
 def fingertip_local(m):
@@ -93,7 +98,7 @@ def fingertip_local(m):
         if m.geom_bodyid[g] != bid or m.geom_type[g] != mujoco.mjtGeom.mjGEOM_MESH or m.geom_contype[g] == 0:
             continue
         mid = m.geom_dataid[g]
-        v = m.mesh_vert[m.mesh_vertadr[mid]:m.mesh_vertadr[mid] + m.mesh_vertnum[mid]]
+        v = m.mesh_vert[m.mesh_vertadr[mid] : m.mesh_vertadr[mid] + m.mesh_vertnum[mid]]
         R = np.zeros(9)
         mujoco.mju_quat2Mat(R, m.geom_quat[g])
         p = v @ R.reshape(3, 3).T + m.geom_pos[g]
@@ -126,13 +131,17 @@ def status_line(sim, units, real):
     lines = []
     for i, j in enumerate(S.JOINTS):
         over = "  ※可動範囲外" if (q[i] < lo[i] - 0.05 or q[i] > hi[i] + 0.05) else ""
-        lines.append(f"  {j:14s} 実機 {real[i]:+7.1f}  →  シミュレーション {math.degrees(q[i]):+6.1f}度"
-                     f"  (範囲 {math.degrees(lo[i]):+.0f}〜{math.degrees(hi[i]):+.0f}){over}")
+        lines.append(
+            f"  {j:14s} 実機 {real[i]:+7.1f}  →  シミュレーション {math.degrees(q[i]):+6.1f}度"
+            f"  (範囲 {math.degrees(lo[i]):+.0f}〜{math.degrees(hi[i]):+.0f}){over}"
+        )
     # 固定側の爪の先端の位置(順運動学)。定規で測った値と比べる
     tip = fingertip_world(sim, q)
     axis = sim.d.xanchor[sim.m.joint("shoulder_pan").id]
     rel = (tip - axis) * 100
-    lines.append(f"  爪の先端: 肩の回転軸から 前 {rel[0]:+.1f}  左 {rel[1]:+.1f} cm、台の底面から 高さ {tip[2] * 100:+.1f} cm")
+    lines.append(
+        f"  爪の先端: 肩の回転軸から 前 {rel[0]:+.1f}  左 {rel[1]:+.1f} cm、台の底面から 高さ {tip[2] * 100:+.1f} cm"
+    )
     o = panel_offset_mm(sim, tip)
     lines.append(f"  「運転/停止」の前面の中心からのずれ: 右 {o[0]:+.0f}  上 {o[1]:+.0f}  奥 {o[2]:+.0f} mm")
     return "\n".join(lines)
@@ -186,7 +195,11 @@ def handle_command(cmd, units, get_real, path, sim=None, wait_s=3.0):
             p = sim.env["panel"]
             out = os.path.join(E.HERE, "panel.json")
             with open(out, "w", encoding="utf-8") as f:
-                json.dump({"button_pos": [round(float(v), 4) for v in p["button_pos"]], "panel_pos": None}, f, indent=2)
+                json.dump(
+                    {"button_pos": [round(float(v), 4) for v in p["button_pos"]], "panel_pos": None},
+                    f,
+                    indent=2,
+                )
             print(f"保存しました: {os.path.abspath(out)}(env_builder.py がこの値を使う)")
     elif c == "q":
         return False
@@ -214,17 +227,21 @@ def handle_panel_command(c, parts, units, get_real, sim, wait_s):
             print("使い方: move 前 左 上 [mm](例: move 0 0 -3)")
             return
         p["button_pos"] = (np.array(p["button_pos"]) + [dx, dy, dz]).tolist()
-    p["panel_pos"] = E.panel_pos_from_button(p["button_pos"], p["panel_rpy_deg"], p["target_button"],
-                                             p["panel_xml"]).tolist()
+    p["panel_pos"] = E.panel_pos_from_button(
+        p["button_pos"], p["panel_rpy_deg"], p["target_button"], p["panel_xml"]
+    ).tolist()
     E.set_panel_pose(sim.m, p["panel_pos"], p["panel_rpy_deg"])
     mujoco.mj_forward(sim.m, sim.d)
     sim._panel_changed = True
     b = np.array(p["button_pos"]) * 100
-    print(f"パネルを置き直しました。「運転/停止」の前面: x {b[0]:.1f}  y {b[1]:.1f}  z {b[2]:.1f} cm(save で保存)")
+    print(
+        f"パネルを置き直しました。「運転/停止」の前面: x {b[0]:.1f}  y {b[1]:.1f}  z {b[2]:.1f} cm(save で保存)"
+    )
 
 
 def live(args):
     import mujoco.viewer
+
     from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
 
     sim = S.Sim(args.model_dir, render=False)
@@ -278,10 +295,11 @@ def to_uint8_hwc(img):
 def replay_frames(sim, units, states, real_tops, order, size=(320, 240)):
     """実機の関節値 states(データセットの列順)をシミュレーションで再現し、比較画像を返すジェネレータ。"""
     import cv2
+
     w, h = size
     side = mujoco.Renderer(sim.m, h, w)
     cam, opt = side_camera(), side_option()
-    for st, real_top in zip(states, real_tops):
+    for st, real_top in zip(states, real_tops, strict=False):
         real = np.empty(6)
         real[order] = st
         sim.d.qpos[sim.qadr] = units.to_sim(real)
@@ -310,11 +328,15 @@ def report(sim, units, states, order):
         out = q[:, i].min() < lo[i] - 0.05 or q[:, i].max() > hi[i] + 0.05
         if out:
             bad.append(j)
-        print(f"  {j:14s} 実機 {real[:, i].min():+7.1f}〜{real[:, i].max():+7.1f}  →  {qmin:+6.0f}〜{qmax:+6.0f}度"
-              f"  (可動範囲 {math.degrees(lo[i]):+.0f}〜{math.degrees(hi[i]):+.0f}){'  ※範囲外' if out else ''}")
+        print(
+            f"  {j:14s} 実機 {real[:, i].min():+7.1f}〜{real[:, i].max():+7.1f}  →  {qmin:+6.0f}〜{qmax:+6.0f}度"
+            f"  (可動範囲 {math.degrees(lo[i]):+.0f}〜{math.degrees(hi[i]):+.0f}){'  ※範囲外' if out else ''}"
+        )
     if bad:
-        print("\n※範囲外の関節があります。数度なら、実機の可動範囲がモデルより少し広いだけなので問題ありません"
-              "(so101_sim.py の joint_range_override で広げられます)。10度以上なら向き(flip)かずれ(zero)を疑ってください。")
+        print(
+            "\n※範囲外の関節があります。数度なら、実機の可動範囲がモデルより少し広いだけなので問題ありません"
+            "(so101_sim.py の joint_range_override で広げられます)。10度以上なら向き(flip)かずれ(zero)を疑ってください。"
+        )
 
 
 def press_point(sim, units, states, order):
@@ -327,17 +349,20 @@ def press_point(sim, units, states, order):
         p, a = ik.fk(units.to_sim(real))
         reach = math.hypot(p[0], p[1])
         if best is None or reach > best[0]:
-            pitch = math.degrees(math.asin(np.clip(a[2], -1, 1)))      # 指先の上下の向き(+ が上向き)
-            yaw = math.degrees(math.atan2(a[1], a[0]))                # 指先の左右の向き(+ が左)
+            pitch = math.degrees(math.asin(np.clip(a[2], -1, 1)))  # 指先の上下の向き(+ が上向き)
+            yaw = math.degrees(math.atan2(a[1], a[0]))  # 指先の左右の向き(+ が左)
             best = (reach, k, p, pitch, yaw)
     return best[1:]
 
 
 def replay(args):
     import imageio.v2 as imageio
+
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
-    root = args.root or os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "lerobot", args.repo_id)
+    root = args.root or os.path.join(
+        os.path.expanduser("~"), ".cache", "huggingface", "lerobot", args.repo_id
+    )
     eps = [int(e) for e in str(args.episode).split(",")]
     ds = LeRobotDataset(args.repo_id, root=root, episodes=eps)
     names = ds.meta.features["observation.state"]["names"]
@@ -367,16 +392,23 @@ def replay(args):
             continue
         k, p, pitch, yaw = r
         pts.append(p)
-        print(f"  エピソード {e}: x={p[0] * 100:5.1f}  y={p[1] * 100:+5.1f}  z={p[2] * 100:5.1f}"
-              f"   指先の向き 上下{pitch:+4.0f}度 左右{yaw:+4.0f}度   時刻 {k * args.stride / ds.fps:4.1f}s")
+        print(
+            f"  エピソード {e}: x={p[0] * 100:5.1f}  y={p[1] * 100:+5.1f}  z={p[2] * 100:5.1f}"
+            f"   指先の向き 上下{pitch:+4.0f}度 左右{yaw:+4.0f}度   時刻 {k * args.stride / ds.fps:4.1f}s"
+        )
     if len(pts) > 1:
         p = np.mean(pts, axis=0)
-        print(f"  平均: x={p[0] * 100:5.1f}  y={p[1] * 100:+5.1f}  z={p[2] * 100:5.1f}"
-              f"   ばらつき(標準偏差) {np.std(pts, axis=0)[:2].max() * 100:.1f}cm")
+        print(
+            f"  平均: x={p[0] * 100:5.1f}  y={p[1] * 100:+5.1f}  z={p[2] * 100:5.1f}"
+            f"   ばらつき(標準偏差) {np.std(pts, axis=0)[:2].max() * 100:.1f}cm"
+        )
     if pts:
         import env_builder as E
+
         pc = E.panel_pos_from_button(np.mean(pts, axis=0))
-        print(f"  → env_builder.py の panel_pos(パネル中心)に入れる値: [{pc[0]:.3f}, {pc[1]:.3f}, {pc[2]:.3f}]")
+        print(
+            f"  → env_builder.py の panel_pos(パネル中心)に入れる値: [{pc[0]:.3f}, {pc[1]:.3f}, {pc[2]:.3f}]"
+        )
 
     states = np.array(per_ep[eps[0]][0])
     print(f"\n--- エピソード {eps[0]} ---")

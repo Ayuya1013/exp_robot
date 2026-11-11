@@ -11,6 +11,7 @@ CSV の列:
     latest      : その時点で最後に実行した動作の番号
     n           : chunk のときの動作数
 """
+
 import csv
 import os
 import threading
@@ -30,8 +31,11 @@ def _header(robot):
     global _motors
     if _motors is None:
         _motors = [k.removesuffix(".pos") for k in robot.action_features]
-        _w.writerow(["kind", "t", "timestep", "latest", "n"]
-                    + [f"a_{m}" for m in _motors] + [f"b_{m}" for m in _motors])
+        _w.writerow(
+            ["kind", "t", "timestep", "latest", "n"]
+            + [f"a_{m}" for m in _motors]
+            + [f"b_{m}" for m in _motors]
+        )
 
 
 def _write(row):
@@ -57,8 +61,11 @@ def control_loop_action(self, verbose=False):
     if nxt is not None:
         with self.latest_action_lock:
             latest = self.latest_action
-        _write(["act", f"{time.time():.4f}", nxt.get_timestep(), latest, 1]
-               + [f"{v:.3f}" for v in nxt.get_action().tolist()] + [f"{v:.3f}" for v in b])
+        _write(
+            ["act", f"{time.time():.4f}", nxt.get_timestep(), latest, 1]
+            + [f"{v:.3f}" for v in nxt.get_action().tolist()]
+            + [f"{v:.3f}" for v in b]
+        )
     return out
 
 
@@ -68,9 +75,11 @@ def _aggregate_action_queues(self, incoming_actions, aggregate_fn=None):
         with self.latest_action_lock:
             latest = self.latest_action
         first, last = incoming_actions[0], incoming_actions[-1]
-        _write(["chunk", f"{time.time():.4f}", first.get_timestep(), latest, len(incoming_actions)]
-               + [f"{v:.3f}" for v in first.get_action().tolist()]
-               + [f"{v:.3f}" for v in last.get_action().tolist()])
+        _write(
+            ["chunk", f"{time.time():.4f}", first.get_timestep(), latest, len(incoming_actions)]
+            + [f"{v:.3f}" for v in first.get_action().tolist()]
+            + [f"{v:.3f}" for v in last.get_action().tolist()]
+        )
     return _orig_aggr(self, incoming_actions, aggregate_fn)
 
 

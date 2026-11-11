@@ -14,6 +14,7 @@ control_panel.xml はパネル正面が -y、押し込みが +y の向きで作�
     python env_builder.py --model_dir ... --save_cams                                    # top と wrist の画像を保存
     python env_builder.py --limits_from_stats <データセット>/meta/stats.json               # 実データから関節の範囲を作る
 """
+
 import argparse
 import json
 import math
@@ -45,9 +46,9 @@ PANEL = dict(
     #   台の前端はモデルの x=0.0646。button_pos から計算すると、壁は台の前端から 280mm、パネル中心の高さは 258mm で、
     #   奥行きは 3mm、高さは 12mm の差(机に触れた確認で、順運動学の高さの誤差は 1cm 程度)
     panel_rpy_deg=[0.0, 0.0, 0.0],
-    target_button="power",             # 押すボタン(btn_<名前>)。押す位置の目印 press_target をここに付ける
-    button_stiffness=None,             # ばね [N/m]。None なら control_panel.xml の値(500)を使う
-    wall_size=[0.5, 0.01, 0.5],        # 壁の半分の大きさ(パネル座標で 横, 厚み, 縦)
+    target_button="power",  # 押すボタン(btn_<名前>)。押す位置の目印 press_target をここに付ける
+    button_stiffness=None,  # ばね [N/m]。None なら control_panel.xml の値(500)を使う
+    wall_size=[0.5, 0.01, 0.5],  # 壁の半分の大きさ(パネル座標で 横, 厚み, 縦)
     # 壁の表面が、パネルの正面から何 m 奥にあるか。None ならパネル本体の裏面に接する(= 厚み 18mm)。
     # 2026/10/25 live の wall で測ると 6mm だった(パネルの残りは壁に埋まっている)。台の前端から壁まで定規で 257mm とも合う
     wall_depth=0.006,
@@ -57,13 +58,16 @@ PANEL = dict(
 )
 # ===== カメラ(cameras.json があれば上書き。tune_camera.py で作る) =====
 CAMERAS = dict(
-    img_w=640, img_h=480,
+    img_w=640,
+    img_h=480,
     # 俯瞰(C920): ロボットの台の右上にあり、壁に正対している(視線が +x と平行)。位置は仮の値で、較正で決める
     top=dict(pos=[-0.05, -0.10, 0.20], lookat=[0.33, -0.10, 0.20], up=[0, 0, 1], fovy=45.0, rot180=False),
     # 手先: gripper ボディの座標系(指先の向きが -z、カメラのある側が +y)。
     #   位置は so101_new_calib_camera.xml のカメラ基板の前面の中心。向きもそのモデルの基板の向き(爪の方へ約25度内向き)。
     #   up は「手首を -90 度回してカメラが上に来たとき、画像の上が天井」になる向き。画角は仮の値で、較正で決める
-    wrist=dict(pos=[0.003, 0.0729, -0.0186], lookat=[0.003, 0.0305, -0.1092], up=[0, 1, 0], fovy=65.0, rot180=False),
+    wrist=dict(
+        pos=[0.003, 0.0729, -0.0186], lookat=[0.003, 0.0305, -0.1092], up=[0, 1, 0], fovy=65.0, rot180=False
+    ),
 )
 # ===== 関節の範囲(limits.json があれば上書き) =====
 LIMITS = dict(
@@ -109,7 +113,7 @@ def cam_quat(pos, lookat, up):
 
 
 def _set_first(obj, attr, val):
-    """mujoco の版によって配列のこともスカラーのこともある属性に、先頭の値を入れる。"""
+    """Mujoco の版によって配列のこともスカラーのこともある属性に、先頭の値を入れる。"""
     cur = getattr(obj, attr)
     if np.ndim(cur):
         arr = np.array(cur, float)
@@ -147,7 +151,11 @@ def joint_limits_sim(limits_real, units):
     for j, (lo, hi) in limits_real.items():
         i = JOINTS.index(j)
         if units is None:
-            a, b = (math.radians(lo), math.radians(hi)) if j != "gripper" else (lo / 50.3 - 0.1745, hi / 50.3 - 0.1745)
+            a, b = (
+                (math.radians(lo), math.radians(hi))
+                if j != "gripper"
+                else (lo / 50.3 - 0.1745, hi / 50.3 - 0.1745)
+            )
         else:
             a = (lo - units.offset[i]) / units.scale[i]
             b = (hi - units.offset[i]) / units.scale[i]
@@ -158,7 +166,8 @@ def joint_limits_sim(limits_real, units):
 def lens_model(cam, img_w, img_h, scale=1.5, margin=1.04):
     """実カメラの内部パラメータ(cam["intrinsics"] の json)があれば、ゆがみを再現するための情報を作る。
     シミュではゆがみのない(ピンホール)画像を少し広い画角で描き、cv2.remap で実カメラと同じゆがみ・主点にする。
-    返り値: dict(fovy, W, H, mapx, mapy) か None"""
+    返り値: dict(fovy, W, H, mapx, mapy) か None
+    """
     path = cam.get("intrinsics")
     if not path:
         return None
@@ -167,6 +176,7 @@ def lens_model(cam, img_w, img_h, scale=1.5, margin=1.04):
         print(f"注意: {path} がないので、ゆがみなしで描きます")
         return None
     import cv2
+
     with open(path, encoding="utf-8") as f:
         intr = json.load(f)
     K = np.array(intr["pinhole"]["K"], float)
@@ -189,15 +199,25 @@ def lens_model(cam, img_w, img_h, scale=1.5, margin=1.04):
 
 def build_spec(model_dir, panel=None, cameras=None, limits=None, units=None):
     """シーンの MjSpec を作る(compile 前)。返り値: (spec, 使った設定)"""
-    p = {**PANEL, **load_json(os.path.join(HERE, "panel.json"), {}), **(panel or {})}  # panel.json は live の btn / move で作る
+    p = {
+        **PANEL,
+        **load_json(os.path.join(HERE, "panel.json"), {}),
+        **(panel or {}),
+    }  # panel.json は live の btn / move で作る
     if p.get("panel_pos") is None:
-        p["panel_pos"] = panel_pos_from_button(p["button_pos"], p["panel_rpy_deg"], p["target_button"],
-                                               p["panel_xml"]).tolist()
+        p["panel_pos"] = panel_pos_from_button(
+            p["button_pos"], p["panel_rpy_deg"], p["target_button"], p["panel_xml"]
+        ).tolist()
     import copy
-    c = copy.deepcopy(cameras or load_json(os.path.join(HERE, "cameras.json"), CAMERAS))  # 元の設定は書き換えない
+
+    c = copy.deepcopy(
+        cameras or load_json(os.path.join(HERE, "cameras.json"), CAMERAS)
+    )  # 元の設定は書き換えない
     lim = limits or load_json(os.path.join(HERE, "limits.json"), LIMITS)
 
-    robot_xml = next((os.path.join(model_dir, f) for f in ROBOT_XML if os.path.exists(os.path.join(model_dir, f))), None)
+    robot_xml = next(
+        (os.path.join(model_dir, f) for f in ROBOT_XML if os.path.exists(os.path.join(model_dir, f))), None
+    )
     if robot_xml is None:
         raise FileNotFoundError(f"{model_dir} に {ROBOT_XML} のどれもありません")
     spec = mujoco.MjSpec.from_file(robot_xml)
@@ -216,32 +236,54 @@ def build_spec(model_dir, panel=None, cameras=None, limits=None, units=None):
 
     wb = spec.worldbody
     wb.add_geom(name="table", type=mujoco.mjtGeom.mjGEOM_PLANE, size=[1, 1, 0.05], rgba=[0.55, 0.5, 0.45, 1])
-    wb.add_light(name="key", pos=[0.0, -0.6, 1.2], dir=[0.3, 0.5, -1], diffuse=[0.6, 0.6, 0.6], castshadow=True)
+    wb.add_light(
+        name="key", pos=[0.0, -0.6, 1.2], dir=[0.3, 0.5, -1], diffuse=[0.6, 0.6, 0.6], castshadow=True
+    )
 
     # パネルと壁を「panel_mount」ボディにまとめる(実行中は model.body_pos / body_quat で動かせる)
-    mount = wb.add_body(name="panel_mount", pos=list(p["panel_pos"]), quat=list(panel_quat(p["panel_rpy_deg"])))
+    mount = wb.add_body(
+        name="panel_mount", pos=list(p["panel_pos"]), quat=list(panel_quat(p["panel_rpy_deg"]))
+    )
     ps = mujoco.MjSpec.from_file(p["panel_xml"])
     root = ps.body("control_panel_root")
     # 壁(パネル座標: 正面が -y)。パネル本体と重なってもよい(固定物どうしは当たり判定をしない)
     board = ps.geom("panel_board")
     if p.get("wall_depth") is None:
-        surface = board.pos[1] + board.size[1]               # パネル本体の裏面
+        surface = board.pos[1] + board.size[1]  # パネル本体の裏面
     else:
         surface = board.pos[1] - board.size[1] + p["wall_depth"]  # パネルの正面から wall_depth 奥
     w = p["wall_size"]
-    mount.add_geom(name="wall", type=mujoco.mjtGeom.mjGEOM_BOX, size=w, pos=[0, surface + w[1], 0],
-                   rgba=[0.88, 0.87, 0.83, 1], group=1, contype=2, conaffinity=1)
+    mount.add_geom(
+        name="wall",
+        type=mujoco.mjtGeom.mjGEOM_BOX,
+        size=w,
+        pos=[0, surface + w[1], 0],
+        rgba=[0.88, 0.87, 0.83, 1],
+        group=1,
+        contype=2,
+        conaffinity=1,
+    )
     sw = p.get("side_wall")
     if sw:  # パネル座標: x が右、y が奥(押す向き)、z が上
         half_w = board.size[0]
-        mount.add_geom(name="side_wall", type=mujoco.mjtGeom.mjGEOM_BOX,
-                       size=[sw["thickness"] / 2, sw["length"] / 2, sw["height"] / 2],
-                       pos=[half_w + sw["gap"] + sw["thickness"] / 2, surface - sw["length"] / 2, 0],
-                       rgba=list(sw["rgba"]), group=1, contype=2, conaffinity=1)
+        mount.add_geom(
+            name="side_wall",
+            type=mujoco.mjtGeom.mjGEOM_BOX,
+            size=[sw["thickness"] / 2, sw["length"] / 2, sw["height"] / 2],
+            pos=[half_w + sw["gap"] + sw["thickness"] / 2, surface - sw["length"] / 2, 0],
+            rgba=list(sw["rgba"]),
+            group=1,
+            contype=2,
+            conaffinity=1,
+        )
     if np.linalg.norm(root.pos) > 1e-9:
-        print(f"注意: control_panel.xml の control_panel_root の pos が {list(root.pos)} です。"
-              "panel_pos からさらにずれるので、0 0 0 にしてください。")
-    root.add_site(name="press_target", pos=list(target_local(ps, p["target_button"])), size=[0.002, 0, 0], group=4)
+        print(
+            f"注意: control_panel.xml の control_panel_root の pos が {list(root.pos)} です。"
+            "panel_pos からさらにずれるので、0 0 0 にしてください。"
+        )
+    root.add_site(
+        name="press_target", pos=list(target_local(ps, p["target_button"])), size=[0.002, 0, 0], group=4
+    )
     # 当たり判定・ばね・押し込みの上限は control_panel.xml の値をそのまま使う。
     # button_stiffness を指定したときだけ、ばねを上書きする(ランダム化などで使う)
     if p["button_stiffness"] is not None:
@@ -262,10 +304,16 @@ def build_spec(model_dir, panel=None, cameras=None, limits=None, units=None):
             spec.visual.global_.offheight = max(spec.visual.global_.offheight, c[name]["_lens"]["H"])
     fov = lambda name: c[name]["_lens"]["fovy"] if c[name]["_lens"] else c[name]["fovy"]
     t = c["top"]
-    wb.add_camera(name="top", pos=list(t["pos"]), quat=list(cam_quat(t["pos"], t["lookat"], t["up"])), fovy=fov("top"))
+    wb.add_camera(
+        name="top", pos=list(t["pos"]), quat=list(cam_quat(t["pos"], t["lookat"], t["up"])), fovy=fov("top")
+    )
     wr = c["wrist"]
-    spec.body("gripper").add_camera(name="wrist", pos=list(wr["pos"]),
-                                    quat=list(cam_quat(wr["pos"], wr["lookat"], wr["up"])), fovy=fov("wrist"))
+    spec.body("gripper").add_camera(
+        name="wrist",
+        pos=list(wr["pos"]),
+        quat=list(cam_quat(wr["pos"], wr["lookat"], wr["up"])),
+        fovy=fov("wrist"),
+    )
     return spec, dict(panel=p, cameras=c, limits=lim)
 
 
@@ -298,23 +346,31 @@ _RENDERERS = {}
 
 
 def render_cams(model, data, cameras, renderer=None):
-    """top と wrist を描く。内部パラメータがあるカメラは、実カメラと同じゆがみと主点にしてから返す。"""
+    """Top と wrist を描く。内部パラメータがあるカメラは、実カメラと同じゆがみと主点にしてから返す。"""
     out = {}
     for name in ("top", "wrist"):
         lens = cameras[name].get("_lens")
         if lens is None:
-            r = renderer or _RENDERERS.setdefault((id(model), "plain"), mujoco.Renderer(model, cameras["img_h"], cameras["img_w"]))
+            r = renderer or _RENDERERS.setdefault(
+                (id(model), "plain"), mujoco.Renderer(model, cameras["img_h"], cameras["img_w"])
+            )
             r.update_scene(data, camera=name)
             img = r.render().copy()
         else:
             import cv2
+
             key = (id(model), lens["W"], lens["H"])
             r = _RENDERERS.get(key)
             if r is None:
                 r = _RENDERERS[key] = mujoco.Renderer(model, lens["H"], lens["W"])
             r.update_scene(data, camera=name)
-            img = cv2.remap(r.render(), lens["mapx"], lens["mapy"], cv2.INTER_AREA if False else cv2.INTER_LINEAR,
-                            borderMode=cv2.BORDER_REPLICATE)
+            img = cv2.remap(
+                r.render(),
+                lens["mapx"],
+                lens["mapy"],
+                cv2.INTER_AREA if False else cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_REPLICATE,
+            )
         if cameras[name].get("rot180"):
             img = np.ascontiguousarray(img[::-1, ::-1])
         out[name] = img
@@ -342,9 +398,10 @@ def limits_from_stats(stats_path, margin, out_path):
 
 def snapshot(model_dir, home, out):
     """今の設定(panel.json、cameras.json、units.json)のシーンを、3方向 x 2姿勢で1枚の画像にする。"""
+    import cv2
     import imageio.v2 as imageio
     import so101_sim as S
-    import cv2
+
     sim = S.Sim(model_dir)
     ik = S.IK(sim)
     home = np.array(home)
@@ -360,7 +417,10 @@ def snapshot(model_dir, home, out):
         sim.reset(q)
         cams = sim.render()
         views = []
-        for az, el, look, hide in ((-35, -15, [0.22, -0.05, 0.18], False), (90, -5, [0.18, -0.05, 0.18], True)):
+        for az, el, look, hide in (
+            (-35, -15, [0.22, -0.05, 0.18], False),
+            (90, -5, [0.18, -0.05, 0.18], True),
+        ):
             c = mujoco.MjvCamera()
             c.lookat[:], c.distance, c.azimuth, c.elevation = look, 0.75, az, el
             opt = mujoco.MjvOption()
@@ -383,9 +443,15 @@ def main():
     ap.add_argument("--panel_pos", type=float, nargs=3, help="パネル中心の位置(button_pos より優先)")
     ap.add_argument("--button_pos", type=float, nargs=3, help="押すボタンの前面中心の位置")
     ap.add_argument("--panel_rpy", type=float, nargs=3)
-    ap.add_argument("--home", type=float, nargs=6, default=[0.0, -1.83, 1.58, 0.97, 0.0, 0.02], help="腕の姿勢 [rad]")
+    ap.add_argument(
+        "--home", type=float, nargs=6, default=[0.0, -1.83, 1.58, 0.97, 0.0, 0.02], help="腕の姿勢 [rad]"
+    )
     ap.add_argument("--save_cams", action="store_true", help="top と wrist の画像を保存して終わる")
-    ap.add_argument("--snapshot", default="", help="全体・俯瞰・手先の画像を、待機姿勢と押す瞬間の2段で1枚にまとめて保存する(例: scene.png)")
+    ap.add_argument(
+        "--snapshot",
+        default="",
+        help="全体・俯瞰・手先の画像を、待機姿勢と押す瞬間の2段で1枚にまとめて保存する(例: scene.png)",
+    )
     ap.add_argument("--limits_from_stats", default="", help="実データの meta/stats.json")
     ap.add_argument("--margin", type=float, default=5.0, help="limits_from_stats の余裕 [度]")
     args = ap.parse_args()
@@ -396,6 +462,7 @@ def main():
 
     try:
         import so101_sim
+
         units = so101_sim.Units(os.path.join(HERE, "units.json"))
     except ImportError:
         units = None
@@ -406,7 +473,9 @@ def main():
     data.qpos[qadr] = args.home
     data.ctrl[[model.actuator(j).id for j in JOINTS]] = args.home
     mujoco.mj_forward(model, data)
-    print(f"パネル中心 {np.round(data.body('panel_mount').xpos, 3)}  押す位置 {np.round(data.site('panel/press_target').xpos, 3)}")
+    print(
+        f"パネル中心 {np.round(data.body('panel_mount').xpos, 3)}  押す位置 {np.round(data.site('panel/press_target').xpos, 3)}"
+    )
 
     if args.snapshot:
         snapshot(args.model_dir, args.home, args.snapshot)
@@ -414,6 +483,7 @@ def main():
 
     if args.save_cams:
         import imageio.v2 as imageio
+
         imgs = render_cams(model, data, cfg["cameras"])
         for k, v in imgs.items():
             imageio.imwrite(f"cam_{k}.png", v)
@@ -421,6 +491,7 @@ def main():
         return
 
     from mujoco import viewer as mj_viewer
+
     with mj_viewer.launch_passive(model, data) as viewer:
         while viewer.is_running():
             t0 = time.time()

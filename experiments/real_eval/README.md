@@ -32,7 +32,7 @@
 | `home_pose.json` | ホーム姿勢の関節角 |
 | `go_home.py` | ホーム姿勢への移動と保存 |
 
-評価の動画は `~/.cache/huggingface/lerobot/local/rollout_eval_*` に残り、パスは `results.csv` の `dataset_dir` 列に書かれる。
+評価の動画は `~/.cache/huggingface/lerobot/local/rollout/<モデル名>/rollout_eval_<試行ID>/` に残り(`HF_LEROBOT_HOME` を設定していればその下の `local/rollout/`)、パスは `results.csv` の `dataset_dir` 列に書かれる。
 
 ## 列(スプレッドシート・results.csv 共通)
 

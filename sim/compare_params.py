@@ -3,8 +3,8 @@
 使い方(PowerShell):
   python compare_params.py <t1 の jsonl> <vis0 の jsonl>
 例:
-  python compare_params.py $env:USERPROFILE\\.cache\\huggingface\\lerobot\\local\\ac_power_sim_t1_sim_params.jsonl `
-                           $env:USERPROFILE\\.cache\\huggingface\\lerobot\\local\\ac_power_sim_vis0_sim_params.jsonl
+  python compare_params.py $env:USERPROFILE\\.cache\\huggingface\\lerobot\\local\\dataset\\sim\\ac_power_sim_t1_sim_params.jsonl `
+                           $env:USERPROFILE\\.cache\\huggingface\\lerobot\\local\\dataset\\sim\\ac_power_sim_vis0_sim_params.jsonl
 """
 import json
 import sys

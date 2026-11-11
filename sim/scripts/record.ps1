@@ -27,7 +27,12 @@ $WristRotation = 0      # 手先カメラの回転。回さないなら 0
 $LerobotDir    = "C:\Users\yuya\lerobot"
 # ==============================
 
-$exe = Join-Path $LerobotDir ".venv\Scripts\lerobot-record.exe"
+# 保存先: 録画(お手本)は local\dataset\real\<Name>\、モデルの評価(-Policy)は local\rollout\<モデル名>\rollout_eval_<日時>_<モデル名>\
+$LerobotHome = if ($env:HF_LEROBOT_HOME) { $env:HF_LEROBOT_HOME } else { Join-Path $env:USERPROFILE ".cache\huggingface\lerobot" }
+$RealDir     = Join-Path $LerobotHome "local\dataset\real"
+$RolloutDir  = Join-Path $LerobotHome "local\rollout"
+
+$exe =Join-Path $LerobotDir ".venv\Scripts\lerobot-record.exe"
 if (-not (Test-Path $exe)) {
     Write-Host "lerobot-record.exe が見つかりません: $exe" -ForegroundColor Red
     exit 1
@@ -38,7 +43,11 @@ if ($Policy -ne "") {
         Write-Host "モデルが見つかりません: $Policy" -ForegroundColor Red
         exit 1
     }
-    $Name = "rollout_${Name}_" + (Get-Date -Format "yyyyMMdd_HHmmss")
+    # モデル名: models\<名前>\ ならその名前。学習の出力 ...\<run>\checkpoints\<step>\pretrained_model なら <run>
+    $policyItem = Get-Item $Policy
+    $ModelName = $policyItem.Name
+    if ($ModelName -eq "pretrained_model") { $ModelName = $policyItem.Parent.Parent.Parent.Name }
+    $Name = "rollout_eval_" + (Get-Date -Format "yyyyMMdd_HHmmss") + "_$ModelName"   # run_trial.ps1 と同じ命名
     $Show = $true
     if ($Episodes -le 0) { $Episodes = 10 }
 }
@@ -64,7 +73,8 @@ foreach ($p in @($FollowerPort, $LeaderPort)) {
 }
 
 # 既存データセットの扱い
-$Root = Join-Path $env:USERPROFILE ".cache\huggingface\lerobot\local\$Name"
+$Root = if ($Policy -ne "") { Join-Path (Join-Path $RolloutDir $ModelName) $Name } else { Join-Path $RealDir $Name }
+New-Item -ItemType Directory -Force (Split-Path $Root) | Out-Null   # 親フォルダだけ作る(データセットのフォルダは lerobot が作る)
 $ResumeFlag = $false
 
 if (Test-Path $Root) {
@@ -83,7 +93,7 @@ if (Test-Path $Root) {
             "R" { $ResumeFlag = $true }
             "N" {
                 $Name = "${Name}_" + (Get-Date -Format "yyyyMMdd_HHmmss")
-                $Root = Join-Path $env:USERPROFILE ".cache\huggingface\lerobot\local\$Name"
+                $Root = Join-Path (Split-Path $Root) $Name
             }
             default { Write-Host "中止しました。"; exit 0 }
         }
@@ -129,7 +139,7 @@ if ($Policy -ne "") {
         Write-Host "lerobot-rollout.exe が見つかりません: $exe" -ForegroundColor Red
         exit 1
     }
-    $recordArgs = @($recordArgs | Where-Object { $_ -notlike "--dataset.root=*" -and $_ -notlike "--dataset.no_stamp=*" })
+    # --dataset.root と --dataset.no_stamp=true はそのまま渡す(名前に日時は付けてあるので、lerobot に付け足させない)
     $recordArgs += "--strategy.type=episodic"
     $recordArgs += "--policy.path=$Policy"
     $recordArgs += "--device=cpu"
@@ -140,10 +150,6 @@ Write-Host "録画回数: $Episodes  (続きから: $ResumeFlag / 映像表示: 
 & $exe @recordArgs
 
 # 結果の確認
-if ($Policy -ne "") {
-     $latest = Get-ChildItem (Join-Path $env:USERPROFILE ".cache\huggingface\lerobot\local") -Directory -Filter "rollout_*" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if ($latest) { $Root = $latest.FullName }
-}
 $info = Join-Path $Root "meta\info.json"
 if (Test-Path $info) {
     try {

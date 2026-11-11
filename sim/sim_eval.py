@@ -3,15 +3,19 @@
   python sim_eval.py --models C:\\Users\\yuya\\lerobot\\models --thetas 0 1 2 --episodes 20
   python sim_eval.py --models ... --only act_mixB_sim00 act_sim200       # 一部のモデルだけ
   python sim_eval.py --stub --thetas 1 --episodes 5                      # 方策の代わりにお手本(IK)で動かす(仕組みの確認用)
-  python sim_eval.py --models ... --fixed_visual --out sim_eval_vis      # 見た目を較正値に固定して評価(vis0 と比べるとき。出力先を分ける)
+  python sim_eval.py --models ... --fixed_visual --name act_vis0        # 見た目を較正値に固定して評価(vis0 と比べるとき。出力先を分ける)
   GPU サーバーで並列に(描画は MUJOCO_GL=egl、推論は --device cuda):
-    for k in 0 1 2 3; do MUJOCO_GL=egl python sim_eval.py --models M --device cuda --shard $k/4 --out O & done; wait
-    python sim_eval.py --summary_only --out O                             # 4つの結果をまとめた表
+    for k in 0 1 2 3; do MUJOCO_GL=egl python sim_eval.py --models M --device cuda --shard $k/4 --name N & done; wait
+    python sim_eval.py --summary_only --name N                            # 4つの結果をまとめた表
 
 --models のフォルダの中の、各モデルのフォルダ(pretrained_model の中身: config.json、model.safetensors、
 policy_preprocessor.json など)を順に評価する。
 結果: sim_eval_results.csv(1エピソード1行)と、モデル × θ の成功率の表(画面と sim_eval_summary.csv)。
 --video_n を付けると、各モデル・各 θ の最初の n エピソードを動画(左: 俯瞰、右: 手先)に保存する。
+
+保存先: <HF_LEROBOT_HOME>/local/rollout/sim_eval/<--name>/(HF_LEROBOT_HOME の既定は ~/.cache/huggingface/lerobot)
+  sim_eval_results*.csv、sim_eval_summary.csv、videos/<モデル>_t<θ>_ep<番号>.mp4
+  --out でフォルダを直接指定することもできる。
 
 成功: 「運転/停止」が押し込みの80%以上沈み、ほかのボタンは沈んでいない。
 失敗の種類: wrong_button(別のボタンを押した)、collision(ボタン以外に当たった、指先が範囲外)、timeout(時間内に押せない)。
@@ -29,6 +33,8 @@ import gen_sim_dataset as G
 import so101_sim as S
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+LEROBOT_HOME = os.environ.get("HF_LEROBOT_HOME", os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "lerobot"))
+SIM_EVAL_ROOT = os.path.join(LEROBOT_HOME, "local", "rollout", "sim_eval")  # 実機の評価(rollout/<モデル>/)と並べて置く
 
 
 class PolicyRunner:
@@ -145,10 +151,13 @@ def main():
     ap.add_argument("--task", default="Press the power button", help="言語の指示(smolVLA などで使う)")
     ap.add_argument("--fixed_visual", action="store_true",
                     help="見た目(色・照明・カメラ)を較正した値に固定し、パネルの位置と動きだけ θ でばらつかせる(vis0 と同じ条件)")
-    ap.add_argument("--out", default="sim_eval")
+    ap.add_argument("--name", default="act", help=f"評価のまとまりの名前。結果は {SIM_EVAL_ROOT}/<name>/ に保存する")
+    ap.add_argument("--out", default="", help="保存先フォルダを直接指定する(省略時は --name から決める)")
     ap.add_argument("--summary_only", action="store_true", help="評価はせず、out の結果をまとめて表にするだけ")
     ap.add_argument("--model_dir", default=os.path.join(os.path.expanduser("~"), "SO-ARM100", "Simulation", "SO101"))
     args = ap.parse_args()
+    args.out = args.out or os.path.join(SIM_EVAL_ROOT, args.name)
+    print(f"保存先: {args.out}")
     if args.summary_only:
         summarize(args.out, os.path.join(args.out, "sim_eval_summary.csv"))
         return
@@ -206,7 +215,8 @@ def main():
                 writer_v = None
                 if ep < args.video_n:
                     import imageio.v2 as imageio
-                    vp = os.path.join(args.out, f"{name}_t{th:g}_ep{ep:02d}.mp4")
+                    os.makedirs(os.path.join(args.out, "videos"), exist_ok=True)
+                    vp = os.path.join(args.out, "videos", f"{name}_t{th:g}_ep{ep:02d}.mp4")
                     writer_v = imageio.get_writer(vp, fps=args.fps, macro_block_size=1)
                 on_frame = (lambda im: writer_v.append_data(np.concatenate([im["top"], im["wrist"]], 1))) if writer_v else None
                 t0 = time.time()

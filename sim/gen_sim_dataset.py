@@ -6,7 +6,7 @@
 
   # 2) データセットを作る(実機データの info.json から列の定義をそのまま写す)
   python gen_sim_dataset.py --model_dir C:\\Users\\yuya\\SO-ARM100\\Simulation\\SO101 `
-      --real_info $env:USERPROFILE\\.cache\\huggingface\\lerobot\\local\\ac_power_button\\meta\\info.json `
+      --real_info $env:USERPROFILE\\.cache\\huggingface\\lerobot\\local\\dataset\\real\\ac_power_button\\meta\\info.json `
       --repo_id local/ac_power_sim --episodes 200
 
 1エピソードの流れ: 待機 → 関節空間でボタンの手前へ → 壁に向かってまっすぐ押す → 少し保持 → 手前へ戻る → 待機姿勢へ戻る。
@@ -196,7 +196,7 @@ def main():
     ap.add_argument("--preview", default="", help="指定すると LeRobot には保存せず、この mp4 に動画を書く")
     ap.add_argument("--real_info", default="", help="実機データセットの meta/info.json")
     ap.add_argument("--repo_id", default="local/ac_power_sim")
-    ap.add_argument("--root", default="", help="保存先フォルダ(省略時は ~/.cache/huggingface/lerobot/<repo_id>)")
+    ap.add_argument("--root", default="", help="保存先フォルダ(省略時は <HF_LEROBOT_HOME>/local/dataset/sim/<repo_id の / より後>)")
     ap.add_argument("--task", default="Press the power button")
     ap.add_argument("--units", default="units.json")
     ap.add_argument("--overwrite", action="store_true", help="保存先があれば消して作り直す")
@@ -240,7 +240,8 @@ def main():
         writer = imageio.get_writer(args.preview, fps=fps, macro_block_size=8)
     else:
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
-        root = args.root or os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "lerobot", args.repo_id)
+        home = os.environ.get("HF_LEROBOT_HOME", os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "lerobot"))
+        root = args.root or os.path.join(home, "local", "dataset", "sim", args.repo_id.split("/")[-1])
         if os.path.exists(root):
             if not args.overwrite:
                 raise SystemExit(f"保存先が既にあります: {root}(作り直すなら --overwrite)")

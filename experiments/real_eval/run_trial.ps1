@@ -33,6 +33,9 @@ $LogsDir    = Join-Path $Here "logs"
 $LastModel  = Join-Path $Here ".last_model"
 $SheetConf  = Join-Path $Here "sheets_config.json"
 $Pending    = Join-Path $Here "pending_sheet.jsonl"   # スプレッドシートに送れなかった行
+# 評価の録画(LeRobot データセット)は <HF_LEROBOT_HOME>\local\rollout\<モデル名>\rollout_eval_<試行ID>\ に置く
+$LerobotHome = if ($env:HF_LEROBOT_HOME) { $env:HF_LEROBOT_HOME } else { Join-Path $env:USERPROFILE ".cache\huggingface\lerobot" }
+$RolloutRoot = Join-Path $LerobotHome "local\rollout"
 
 # venv を有効にしていなくても rerun.exe などが見つかるように
 $env:PATH = (Join-Path $LerobotDir ".venv\Scripts") + ";" + $env:PATH
@@ -180,6 +183,8 @@ Write-Host "エアコンが停止状態になっていることを確認して�
 Read-Host "Enter で開始" | Out-Null
 
 $datasetName = "rollout_eval_$trialId"
+$datasetDir  = Join-Path (Join-Path $RolloutRoot $model.Name) $datasetName
+New-Item -ItemType Directory -Force (Split-Path $datasetDir) | Out-Null   # モデルのフォルダ(録画のフォルダ自体は lerobot が作る)
 $wrist = "wrist: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30, fourcc: MJPG"
 if ($WristRotation -ne 0) { $wrist += ", rotation: $WristRotation" }
 $wrist += "}"
@@ -198,6 +203,8 @@ $rolloutArgs = @(
     "--display_ip=127.0.0.1",
     "--display_port=9876",
     "--dataset.repo_id=local/$datasetName",
+    "--dataset.root=$datasetDir",
+    "--dataset.no_stamp=true",
     "--dataset.single_task=$Task",
     "--dataset.num_episodes=1",
     "--dataset.episode_time_s=$EpisodeTime",
@@ -236,11 +243,9 @@ $t1 = Get-Date
 $wall = [math]::Round(($t1 - $t0).TotalSeconds, 1)
 Add-Content -Path $rolloutLog -Value "", "# end      : $($t1.ToString('s'))  exit=$rolloutCode  wall=${wall}s" -Encoding UTF8
 
-$datasetDir = Join-Path $env:USERPROFILE ".cache\huggingface\lerobot\local\$datasetName"
 if (-not (Test-Path $datasetDir)) {
-    $hit = Get-ChildItem (Join-Path $env:USERPROFILE ".cache\huggingface\lerobot\local") -Directory -Filter "$datasetName*" -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    $datasetDir = if ($hit) { $hit.FullName } else { "" }
+    Write-Host "録画のフォルダが見つかりません: $datasetDir" -ForegroundColor Yellow
+    $datasetDir = ""
 }
 if ($rolloutCode -ne 0) {
     Write-Host "lerobot-rollout が終了コード $rolloutCode で終わりました。ログ: $rolloutLog" -ForegroundColor Yellow

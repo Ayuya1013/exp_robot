@@ -180,3 +180,6 @@ outputs/
 # Large local artifacts (not pushed to GitHub)
 /act_eval.tgz
 /models/
+
+# 廃棄予定置き場
+dust_box/

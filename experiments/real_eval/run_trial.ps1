@@ -28,11 +28,12 @@ $Python     = Join-Path $LerobotDir ".venv\Scripts\python.exe"
 $RolloutExe = Join-Path $LerobotDir ".venv\Scripts\lerobot-rollout.exe"
 $HomeScript = Join-Path $Here "go_home.py"
 $HomePose   = Join-Path $Here "home_pose.json"
-$ResultsCsv = Join-Path $Here "results.csv"
-$LogsDir    = Join-Path $Here "logs"
-$LastModel  = Join-Path $Here ".last_model"
+$RealLogDir = Join-Path $LerobotDir "logs\real"
+$ResultsCsv = Join-Path $RealLogDir "results.csv"
+$LogsDir    = Join-Path $RealLogDir "trials"
+$LastModel  = Join-Path $RealLogDir ".last_model"
 $SheetConf  = Join-Path $Here "sheets_config.json"
-$Pending    = Join-Path $Here "pending_sheet.jsonl"   # スプレッドシートに送れなかった行
+$Pending    = Join-Path $RealLogDir "pending_sheet.jsonl"   # スプレッドシートに送れなかった行
 # 評価の録画(LeRobot データセット)は <HF_LEROBOT_HOME>\local\rollout\<モデル名>\rollout_eval_<試行ID>\ に置く
 $LerobotHome = if ($env:HF_LEROBOT_HOME) { $env:HF_LEROBOT_HOME } else { Join-Path $env:USERPROFILE ".cache\huggingface\lerobot" }
 $RolloutRoot = Join-Path $LerobotHome "local\rollout"

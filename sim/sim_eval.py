@@ -3,41 +3,34 @@
   python sim_eval.py --models C:\\Users\\yuya\\lerobot\\models --thetas 0 1 2 --episodes 20
   python sim_eval.py --models ... --only act_mixB_sim00 act_sim200       # 一部のモデルだけ
   python sim_eval.py --stub --thetas 1 --episodes 5                      # 方策の代わりにお手本(IK)で動かす(仕組みの確認用)
-  python sim_eval.py --models ... --fixed_visual --name act_vis0        # 見た目を較正値に固定して評価(vis0 と比べるとき。出力先を分ける)
+  python sim_eval.py --models ... --fixed_visual --run vis_fixed         # 見た目を較正値に固定して評価(vis0 と比べるとき。出力先を分ける)
   GPU サーバーで並列に(描画は MUJOCO_GL=egl、推論は --device cuda):
-    for k in 0 1 2 3; do MUJOCO_GL=egl python sim_eval.py --models M --device cuda --shard $k/4 --name N & done; wait
-    python sim_eval.py --summary_only --name N                            # 4つの結果をまとめた表
+    for k in 0 1 2 3; do MUJOCO_GL=egl python sim_eval.py --models M --device cuda --shard $k/4 --run R & done; wait
+    python sim_eval.py --summary_only --run R                             # 4つの結果をまとめた表
 
 --models のフォルダの中の、各モデルのフォルダ(pretrained_model の中身: config.json、model.safetensors、
 policy_preprocessor.json など)を順に評価する。
-結果: sim_eval_results.csv(1エピソード1行)と、モデル × θ の成功率の表(画面と sim_eval_summary.csv)。
---video_n を付けると、各モデル・各 θ の最初の n エピソードを動画(左: 俯瞰、右: 手先)に保存する。
-
-保存先: <HF_LEROBOT_HOME>/local/rollout/sim_eval/<--name>/(HF_LEROBOT_HOME の既定は ~/.cache/huggingface/lerobot)
-  sim_eval_results*.csv、sim_eval_summary.csv、videos/<モデル>_t<θ>_ep<番号>.mp4
-  --out でフォルダを直接指定することもできる。
+記録は lerobot/logs/sim/<run>/ に入る(--run で名前を付ける。既定は sim_eval):
+  sim_eval_results.csv(1エピソード1行)、sim_eval_summary.csv(モデル × θ の成功率の表)、videos/(--video_n を付けたとき。左: 俯瞰、右: 手先)
 
 成功: 「運転/停止」が押し込みの80%以上沈み、ほかのボタンは沈んでいない。
 失敗の種類: wrong_button(別のボタンを押した)、collision(ボタン以外に当たった、指先が範囲外)、timeout(時間内に押せない)。
 """
-
 import argparse
 import csv
 import json
+import math
 import os
 import time
 
-import gen_sim_dataset as G
 import numpy as np
+
+import gen_sim_dataset as G
 import so101_sim as S
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LEROBOT_HOME = os.environ.get(
-    "HF_LEROBOT_HOME", os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "lerobot")
-)
-SIM_EVAL_ROOT = os.path.join(
-    LEROBOT_HOME, "local", "rollout", "sim_eval"
-)  # 実機の評価(rollout/<モデル>/)と並べて置く
+REPO = os.path.dirname(HERE)  # lerobot/(sim の1つ上)
+LOG_SIM = os.path.join(REPO, "logs", "sim")  # シミュレーション評価の記録の置き場所
 
 
 class PolicyRunner:
@@ -45,22 +38,15 @@ class PolicyRunner:
 
     def __init__(self, path, device="cpu", task="Press the power button"):
         import torch
-
         from lerobot.configs.policies import PreTrainedConfig
-        from lerobot.policies import (
-            get_policy_class,
-            make_pre_post_processors,
-            prepare_observation_for_inference,
-        )
-
+        from lerobot.policies import get_policy_class, make_pre_post_processors, prepare_observation_for_inference
         self.torch, self.prep = torch, prepare_observation_for_inference
         cfg = PreTrainedConfig.from_pretrained(path)
         cfg.device = device
         self.policy = get_policy_class(cfg.type).from_pretrained(path, config=cfg)
         self.policy.eval()
         self.pre, self.post = make_pre_post_processors(
-            cfg, pretrained_path=path, preprocessor_overrides={"device_processor": {"device": device}}
-        )
+            cfg, pretrained_path=path, preprocessor_overrides={"device_processor": {"device": device}})
         self.device = torch.device(device)
         self.task = task
         self.image_keys = [k for k in cfg.input_features if k.startswith("observation.images.")]
@@ -111,17 +97,9 @@ def run_episode(sim, units, runner, home, fps, max_s, buttons, target="power", o
     travel = sim.cfg["button_travel"]
     runner.reset()  # お手本の計画は内部で腕を動かすので、先に済ませてから初期化する
     sim.reset(home)
-    res = dict(
-        success=False,
-        t_press=None,
-        reason="timeout",
-        first_hit=None,
-        wrong=None,
-        max_depth_mm=0.0,
-        min_dist_mm=1e9,
-    )
+    res = dict(success=False, t_press=None, reason="timeout", first_hit=None, wrong=None, max_depth_mm=0.0,
+               min_dist_mm=1e9)
     import check_alignment as C
-
     for k in range(int(max_s * fps)):
         imgs = sim.render()
         if on_frame:
@@ -143,9 +121,7 @@ def run_episode(sim, units, runner, home, fps, max_s, buttons, target="power", o
         if res["wrong"] is not None:
             break
     if not res["success"]:
-        res["reason"] = (
-            "wrong_button" if res["wrong"] else ("collision" if res["first_hit"] is not None else "timeout")
-        )
+        res["reason"] = "wrong_button" if res["wrong"] else ("collision" if res["first_hit"] is not None else "timeout")
     else:
         res["reason"] = "ok"
     res["min_dist_mm"] = round(res["min_dist_mm"], 1)
@@ -155,11 +131,8 @@ def run_episode(sim, units, runner, home, fps, max_s, buttons, target="power", o
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument(
-        "--models",
-        default=os.path.join(os.path.dirname(HERE), "models"),
-        help="評価するモデルのフォルダが入ったフォルダ",
-    )
+    ap.add_argument("--models", default=os.path.join(os.path.dirname(HERE), "models"),
+                    help="評価するモデルのフォルダが入ったフォルダ")
     ap.add_argument("--only", nargs="*", default=None, help="この名前を含むモデルだけ評価する")
     ap.add_argument("--stub", action="store_true", help="方策の代わりにお手本(IK)で動かす(仕組みの確認)")
     ap.add_argument("--thetas", type=float, nargs="+", default=[0.0, 1.0, 2.0])
@@ -169,47 +142,35 @@ def main():
     ap.add_argument("--fps", type=int, default=30)
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--video_n", type=int, default=0, help="各モデル・各 θ の最初の n エピソードを動画にする")
-    ap.add_argument(
-        "--shard",
-        default="0/1",
-        help="k/n:エピソード番号を n で割った余りが k のものだけ評価する(n 個のプロセスで並列に回す)",
-    )
+    ap.add_argument("--shard", default="0/1",
+                    help="k/n:エピソード番号を n で割った余りが k のものだけ評価する(n 個のプロセスで並列に回す)")
     ap.add_argument("--task", default="Press the power button", help="言語の指示(smolVLA などで使う)")
-    ap.add_argument(
-        "--fixed_visual",
-        action="store_true",
-        help="見た目(色・照明・カメラ)を較正した値に固定し、パネルの位置と動きだけ θ でばらつかせる(vis0 と同じ条件)",
-    )
-    ap.add_argument(
-        "--name", default="act", help=f"評価のまとまりの名前。結果は {SIM_EVAL_ROOT}/<name>/ に保存する"
-    )
-    ap.add_argument("--out", default="", help="保存先フォルダを直接指定する(省略時は --name から決める)")
-    ap.add_argument(
-        "--summary_only", action="store_true", help="評価はせず、out の結果をまとめて表にするだけ"
-    )
-    ap.add_argument(
-        "--model_dir", default=os.path.join(os.path.expanduser("~"), "SO-ARM100", "Simulation", "SO101")
-    )
+    ap.add_argument("--fixed_visual", action="store_true",
+                    help="見た目(色・照明・カメラ)を較正した値に固定し、パネルの位置と動きだけ θ でばらつかせる(vis0 と同じ条件)")
+    ap.add_argument("--run", default="sim_eval",
+                    help="評価の名前。記録は lerobot/logs/sim/<run>/ に入る。同じ名前で実行すると続きから再開する")
+    ap.add_argument("--out", default=None, help="記録の置き場所を直接指定する(--run より優先)")
+    ap.add_argument("--summary_only", action="store_true", help="評価はせず、out の結果をまとめて表にするだけ")
+    ap.add_argument("--send_sheet", action="store_true",
+                    help="集計の表をスプレッドシートにも送る(experiments/real_eval/sheets_config.json を使う)")
+    ap.add_argument("--model_dir", default=os.path.join(os.path.expanduser("~"), "SO-ARM100", "Simulation", "SO101"))
     args = ap.parse_args()
-    args.out = args.out or os.path.join(SIM_EVAL_ROOT, args.name)
-    print(f"保存先: {args.out}")
+    args.out = args.out or os.path.join(LOG_SIM, args.run)
     if args.summary_only:
-        summarize(args.out, os.path.join(args.out, "sim_eval_summary.csv"))
+        summarize(args.out, os.path.join(args.out, "sim_eval_summary.csv"), args.send_sheet, args.run)
         return
 
     if args.stub:
         models = [("stub_ik", None)]
     else:
-        models = sorted(
-            (d, os.path.join(args.models, d))
-            for d in os.listdir(args.models)
-            if os.path.exists(os.path.join(args.models, d, "config.json"))
-        )
+        models = sorted((d, os.path.join(args.models, d)) for d in os.listdir(args.models)
+                        if os.path.exists(os.path.join(args.models, d, "config.json")))
         if args.only:
             models = [m for m in models if any(o in m[0] for o in args.only)]
     if not models:
         raise SystemExit(f"{args.models} にモデル(config.json のあるフォルダ)がありません")
     print("評価するモデル:", ", ".join(m[0] for m in models))
+    print("記録の置き場所:", os.path.abspath(args.out))
 
     os.makedirs(args.out, exist_ok=True)
     k, n_sh = (int(v) for v in args.shard.split("/"))
@@ -220,23 +181,8 @@ def main():
         with open(csv_path, newline="", encoding="utf-8") as f:
             for r in csv.DictReader(f):
                 done.add((r["model"], float(r["theta"]), int(r["episode"])))
-    fields = [
-        "model",
-        "theta",
-        "episode",
-        "seed",
-        "success",
-        "reason",
-        "t_press",
-        "first_hit",
-        "wrong",
-        "max_depth_mm",
-        "min_dist_mm",
-        "panel_dpos_mm",
-        "panel_drpy_deg",
-        "light_intensity",
-        "wall_s",
-    ]
+    fields = ["model", "theta", "episode", "seed", "success", "reason", "t_press", "first_hit", "wrong",
+              "max_depth_mm", "min_dist_mm", "panel_dpos_mm", "panel_drpy_deg", "light_intensity", "wall_s"]
     new_file = not os.path.exists(csv_path)
     fcsv = open(csv_path, "a", newline="", encoding="utf-8")
     writer = csv.DictWriter(fcsv, fieldnames=fields)
@@ -247,11 +193,7 @@ def main():
         sim = S.Sim(args.model_dir)
         units = S.Units(os.path.join(HERE, "units.json"))
         buttons = button_joints(sim)
-        runner = (
-            StubRunner(sim, S.IK(sim), units, args.fps)
-            if args.stub
-            else PolicyRunner(path, args.device, args.task)
-        )
+        runner = StubRunner(sim, S.IK(sim), units, args.fps) if args.stub else PolicyRunner(path, args.device, args.task)
         for th in args.thetas:
             sim.theta = th
             # θ=0 は場面も初期姿勢も毎回同じで、ACT の推論も決定的なので、1回で十分
@@ -266,62 +208,36 @@ def main():
                 params = sim.randomize(rng)
                 if args.fixed_visual:  # 乱数は同じだけ引いたうえで、見た目だけ基準に戻す(gen_sim_dataset.py --fixed_visual と同じ方式)
                     if not hasattr(sim, "restore_visual"):
-                        raise SystemExit(
-                            "so101_sim.py に Sim.restore_visual() がありません(vis0 を作ったときの版に更新してください)"
-                        )
+                        raise SystemExit("so101_sim.py に Sim.restore_visual() がありません(vis0 を作ったときの版に更新してください)")
                     sim.restore_visual()
-                home = (
-                    np.array(G.MOTION["home"]) + rng.normal(0, 1, 6) * np.array(G.MOTION["home_noise"]) * th
-                )
+                home = np.array(G.MOTION["home"]) + rng.normal(0, 1, 6) * np.array(G.MOTION["home_noise"]) * th
                 writer_v = None
                 if ep < args.video_n:
                     import imageio.v2 as imageio
-
                     os.makedirs(os.path.join(args.out, "videos"), exist_ok=True)
                     vp = os.path.join(args.out, "videos", f"{name}_t{th:g}_ep{ep:02d}.mp4")
                     writer_v = imageio.get_writer(vp, fps=args.fps, macro_block_size=1)
-                on_frame = (
-                    (lambda im: writer_v.append_data(np.concatenate([im["top"], im["wrist"]], 1)))  # noqa: B023 (使うのは同じ回のループの中だけ)
-                    if writer_v
-                    else None
-                )
+                on_frame = (lambda im: writer_v.append_data(np.concatenate([im["top"], im["wrist"]], 1))) if writer_v else None
                 t0 = time.time()
                 res = run_episode(sim, units, runner, home, args.fps, args.max_s, buttons, on_frame=on_frame)
                 if writer_v:
                     writer_v.close()
-                writer.writerow(
-                    dict(
-                        model=name,
-                        theta=th,
-                        episode=ep,
-                        seed=seed,
-                        success=int(res["success"]),
-                        reason=res["reason"],
-                        t_press=res["t_press"],
-                        first_hit=res["first_hit"],
-                        wrong=res["wrong"],
-                        max_depth_mm=res["max_depth_mm"],
-                        min_dist_mm=res["min_dist_mm"],
-                        panel_dpos_mm=json.dumps(params["panel_dpos_mm"]),
-                        panel_drpy_deg=json.dumps(params["panel_drpy_deg"]),
-                        light_intensity=params.get("light_intensity"),
-                        wall_s=round(time.time() - t0, 1),
-                    )
-                )
+                writer.writerow(dict(model=name, theta=th, episode=ep, seed=seed, success=int(res["success"]),
+                                     reason=res["reason"], t_press=res["t_press"], first_hit=res["first_hit"],
+                                     wrong=res["wrong"], max_depth_mm=res["max_depth_mm"], min_dist_mm=res["min_dist_mm"],
+                                     panel_dpos_mm=json.dumps(params["panel_dpos_mm"]),
+                                     panel_drpy_deg=json.dumps(params["panel_drpy_deg"]),
+                                     light_intensity=params.get("light_intensity"), wall_s=round(time.time() - t0, 1)))
                 fcsv.flush()
-                print(
-                    f"{name} θ={th:g} #{ep:02d}: {res['reason']:12s} 押すまで {res['t_press']}s  "
-                    f"一番近づいた {res['min_dist_mm']}mm  ({time.time() - t0:.0f}s)",
-                    flush=True,
-                )
+                print(f"{name} θ={th:g} #{ep:02d}: {res['reason']:12s} 押すまで {res['t_press']}s  "
+                      f"一番近づいた {res['min_dist_mm']}mm  ({time.time() - t0:.0f}s)", flush=True)
     fcsv.close()
-    summarize(args.out, os.path.join(args.out, "sim_eval_summary.csv"))
+    summarize(args.out, os.path.join(args.out, "sim_eval_summary.csv"), args.send_sheet, args.run)
 
 
-def summarize(out_dir, out_path):
+def summarize(out_dir, out_path, send_sheet=False, run_name="sim_eval"):
     """out_dir の sim_eval_results*.csv(並列に回した分も含む)をまとめて表にする。"""
     import glob
-
     rows = []
     for p in sorted(glob.glob(os.path.join(out_dir, "sim_eval_results*.csv"))):
         with open(p, newline="", encoding="utf-8") as f:
@@ -330,6 +246,7 @@ def summarize(out_dir, out_path):
     thetas = sorted({float(r["theta"]) for r in rows})
     print("\n成功率(成功数 / 回数)と、失敗の内訳(別のボタン / 当たった / 時間切れ)")
     lines = [["model"] + [f"theta{t:g}" for t in thetas] + ["all"]]
+    sheet_rows = []
     for m in models:
         cells = []
         for t in thetas + [None]:
@@ -337,11 +254,65 @@ def summarize(out_dir, out_path):
             ok = sum(int(r["success"]) for r in rs)
             fails = {k: sum(r["reason"] == k for r in rs) for k in ("wrong_button", "collision", "timeout")}
             cells.append(f"{ok}/{len(rs)} ({fails['wrong_button']}/{fails['collision']}/{fails['timeout']})")
+            if t is not None:
+                press_times = [float(r["t_press"]) for r in rs if r.get("t_press") and r["success"] == "1"]
+                sheet_rows.append(dict(
+                    summary_id=f"{run_name}_{m}_t{t:g}",
+                    run=run_name, model=m, theta=f"{t:g}",
+                    n_trials=len(rs), n_success=ok,
+                    success_rate=f"{ok/len(rs)*100:.0f}%" if rs else "",
+                    n_wrong_button=fails["wrong_button"],
+                    n_collision=fails["collision"],
+                    n_timeout=fails["timeout"],
+                    mean_press_s=f"{sum(press_times)/len(press_times):.1f}" if press_times else "",
+                ))
         lines.append([m] + cells)
         print(f"  {m:28s} " + "  ".join(f"{c:18s}" for c in cells))
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         csv.writer(f).writerows(lines)
     print(f"保存: {out_path}")
+    if send_sheet and sheet_rows:
+        _send_summary_to_sheet(sheet_rows)
+
+
+def _send_summary_to_sheet(sheet_rows):
+    """集計の行をスプレッドシートの sim_results シートに送る。"""
+    import urllib.request, urllib.error
+    conf_candidates = [
+        os.path.join(HERE, "..", "experiments", "real_eval", "sheets_config.json"),
+        os.path.join(HERE, "sheets_config.json"),
+    ]
+    conf_path = None
+    for p in conf_candidates:
+        if os.path.exists(p):
+            conf_path = p
+            break
+    if not conf_path:
+        print("sheets_config.json が見つかりません。スプレッドシートには送りません。")
+        return
+    conf = json.load(open(conf_path))
+    sent, skipped, failed = 0, 0, 0
+    for row in sheet_rows:
+        body = json.dumps(dict(
+            token=conf["token"], sheet_name="sim_results", id_key="summary_id", row=row
+        )).encode("utf-8")
+        req = urllib.request.Request(conf["url"], data=body,
+                                     headers={"Content-Type": "application/json; charset=utf-8"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as res:
+                result = json.loads(res.read())
+                if result.get("ok"):
+                    if result.get("duplicate"):
+                        skipped += 1
+                    else:
+                        sent += 1
+                else:
+                    print(f"  エラー: {result.get('error')}")
+                    failed += 1
+        except Exception as e:
+            print(f"  送れませんでした: {e}")
+            failed += 1
+    print(f"スプレッドシート(sim_results): 送った {sent} 行、重複 {skipped} 行、失敗 {failed} 行")
 
 
 if __name__ == "__main__":

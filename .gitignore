@@ -175,6 +175,7 @@ outputs/
 *.stl
 *.urdf
 *.xml
+!sim/control_panel.xml
 *.part
 
 # Large local artifacts (not pushed to GitHub)

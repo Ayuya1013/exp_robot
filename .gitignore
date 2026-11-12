@@ -80,6 +80,7 @@ coverage.xml
 
 ### Logs & Temporary Files ###
 logs/
+for_train/
 tmp/
 *.log
 pip-log.txt

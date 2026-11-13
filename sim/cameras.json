@@ -19,7 +19,7 @@
     ],
     "fovy": 41.99,
     "rot180": false,
-    "intrinsics": "calib\\top_int\\intrinsics.json"
+    "intrinsics": "calib/top_int/intrinsics.json"
   },
   "wrist": {
     "pos": [
@@ -39,6 +39,6 @@
     ],
     "fovy": 47.34,
     "rot180": false,
-    "intrinsics": "calib\\wrist_int\\intrinsics.json"
+    "intrinsics": "calib/wrist_int/intrinsics.json"
   }
 }
